@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 import gym
-from es_modular.interaction import custom_gym
+from es_map.interaction import custom_gym
 
 """
 Class containing the policy. 
@@ -84,6 +84,7 @@ class ControllerAndEnv:
         self.env = gym.make(self.env_id)
 
     def get_action(self, x):
+        #return self.bias[len(self.bias)-1]
         h = np.array(x).flatten()
         num_layers = len(self.weight)
         for i in range(num_layers):
@@ -162,6 +163,9 @@ def simulate(theta, model, max_episode_length, seed, train_mode=False,
     final_pos = None
     t = 0
     info = {}
+    
+    imgs = []
+    
     for t in range(max_episode_length):
         if model.use_norm_obs:
             # use obs_stats that are updated by master
@@ -187,7 +191,7 @@ def simulate(theta, model, max_episode_length, seed, train_mode=False,
             total_reward += reward
 
         if render:
-            model.env.render()
+            img = model.env.render(mode="rgb_array")
 
         if record_obs:
             all_obs.append(obs)
@@ -211,5 +215,5 @@ def simulate(theta, model, max_episode_length, seed, train_mode=False,
     else:
         sum = sumsq = count = None
 
-    return total_reward, t, bc, final_pos, sum, sumsq, count
+    return total_reward, t, bc, final_pos, sum, sumsq, count, imgs
 

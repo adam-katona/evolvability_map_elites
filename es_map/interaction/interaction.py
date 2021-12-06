@@ -42,13 +42,15 @@ class Interaction:
             self.model.set_obs_stats(obs_mean, obs_std)
         seed = random_state.randint(1e6)
 
-        total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count = simulate(theta,
+        total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count, imgs = simulate(theta,
                                                                                     self.model,
                                                                                     max_episode_length=self.max_episode_length,
                                                                                     train_mode=not eval,
                                                                                     seed=seed,
                                                                                     render=render)
 
+        if render is True:
+            return total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count, imgs
         return total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count
 
 

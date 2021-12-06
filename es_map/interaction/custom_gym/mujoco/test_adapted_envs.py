@@ -8,7 +8,7 @@
 # limitations under the License.
 
 import gym
-from es_modular.interaction import custom_gym
+from es_map.interaction import custom_gym
 import numpy as np
 
 

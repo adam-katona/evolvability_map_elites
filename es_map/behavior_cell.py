@@ -16,9 +16,10 @@ example_evaluated_individual = {
     "eval_fitness" : 2.2,
     "eval_bc" : [1,2],
     
-    "obs_stats" : {   # used for observation normalization. These stats are used for the children as well
-        "obs_mean" : None,
-        "obs_std" : None,
+    "obs_stats" : {   # used for observation normalization. These stats are used for the children as well ??
+        "obs_sum" : None,
+        "obs_sq" : None,
+        "obs_count" : None,
     },
     
     "evolvability" : 2.1,

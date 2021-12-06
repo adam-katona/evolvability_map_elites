@@ -10,6 +10,8 @@ from es_map import es_update
 from es_map import novelty_archive
 from es_map import behavior_map
 
+from es_map import random_table
+
 
 default_config = {
     "evaluate_batch_size" : 10,        # how many evaluations to calculate per remote call (purely comutational parameter, no effect on result)
@@ -122,6 +124,6 @@ def run_map_elites_experiment(config,register_weights_and_biases=False):
 
 
 
-
+    
 
 

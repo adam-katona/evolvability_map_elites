@@ -10,7 +10,7 @@
 import numpy as np
 from gym import utils
 from gym.envs.mujoco import mujoco_env
-from es_modular.interaction.custom_gym.mujoco.damage_for_adaptability_tests import modify_ant_xml
+from es_map.interaction.custom_gym.mujoco.damage_for_adaptability_tests import modify_ant_xml
 from mujoco_py.generated import const
 import os
 
