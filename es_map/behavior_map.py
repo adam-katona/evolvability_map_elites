@@ -56,7 +56,7 @@ class Grid_behaviour_map:
         
     def get_non_empty_cells(self,config):
         non_empty_mask = self.data != None
-        if sum(non_empty_mask) == 0:
+        if np.sum(non_empty_mask) == 0:
             return []
         else:
             return self.data[non_empty_mask]

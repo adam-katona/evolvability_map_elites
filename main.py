@@ -1,9 +1,19 @@
 
 
+import os
+os.environ["MKL_NUM_THREADS"] = "1"  # set this beofre importing numpy
+os.environ["NUMEXPR_NUM_THREADS"] = "1" 
+os.environ["OMP_NUM_THREADS"] = "1" 
+
 import random
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+
+from dask.distributed import Client
+import dask
+
+import wandb
 
 from es_map import map_elites
 from es_map import es_update
@@ -12,46 +22,129 @@ from es_map import behavior_map
 
 from es_map import random_table
 
+            
+def calculate_obs_stats(sum,sumsq,count):
+    mean = sum / count
+    std = np.sqrt(np.maximum(sumsq / count - np.square(mean), 1e-2))
+    return mean,std
+
 
 default_config = {
     "evaluate_batch_size" : 10,        # how many evaluations to calculate per remote call (purely comutational parameter, no effect on result)
     "child_evaluate_batch_size" : 20,  # how many evaluations to calculate per remote call (purely comutational parameter, no effect on result)
     
+    "GA_MAP_ELITES_NUM_GENERATIONS" : 100000,
+    "ES_MAP_ELITES_NUM_GENERATIONS" : 1000,
     
+    "GA_MUTATION_POWER" : 0.02,
 }        
 
 def get_random_individual(config):
-    return np.randn(10)   
+    from es_map.interaction import interaction
+    env = interaction.build_interaction_module(config["env_id"],config)
+    theta = env.initial_theta()
+    return theta
 
-def evaluate(params,config):
-    # calculate fitness and bc of params
-    return np.random.randn(1)[0],np.random.randn(2)
 
-def evaluate_children(individual,config):
-    return {
-        "seed" : 42,  # used to reconstruct the perturbations, which can be used to do an ES step
-        "fitnesses" : np.random.randn(config["ES_pop_size"]),
-        "bcs" : np.random.randn([config["ES_pop_size"],2]),
-    }
+def set_up_weights_and_biases_run(config,run_name):
+    wandb.config = config
+    wandb.init(project="evolvability_map_elites", entity="adam_katona")  # TODO reinit=True, if want to run more experiments in single run
+    wandb.run.name = run_name
+    wandb.run.config.update(wandb.config)
+    wandb.run.tags = wandb.run.tags + (config["env_id"],)
+    
+    # create a folder for checkpoints and large files
+    run_name = wandb.run.dir.split("/")[-2]
+    run_checkpoint_path = "/scratch/ak1774/runs/large_files/" + run_name
+    os.makedirs(run_checkpoint_path,exist_ok=True)
+    
+    import json
+    with open('config.json', 'w') as f:
+        json.dump(config, f)
+        
 
-def evaluate_individual_multiple_times(params,n):
-    results = [evaluate(params) for _ in range(n)]
-    fitnesses = np.array([res[0] for res in results])
-    bcs = np.array([res[1] for res in results])
-    return fitnesses,bcs
+
+def set_up_dask_client():
+    client = Client(n_workers=60, threads_per_worker=1)
+    def set_up_worker():
+        import os
+        os.environ["MKL_NUM_THREADS"] = "1" 
+        os.environ["NUMEXPR_NUM_THREADS"] = "1" 
+        os.environ["OMP_NUM_THREADS"] = "1" 
+    client.run(set_up_worker)
+    return client
+
+def save_model_params(params):
+    # save the params into wandb.run.dir folder. 
+    # Once wandb.finish() is called it will sync it to the cloud
+    pass
+
+
+# simple map elites means we only have one map, and only do exploit updates
+def run_simple_ga_map_elites(config,register_weights_and_biases=False):
+
+    # prepare dask client
+    client = set_up_dask_client()
+    
+    b_map = behavior_map.Grid_behaviour_map(config)
+    b_archive = novelty_archive.NoveltyArchive(bc_dim = len(config["map_elites_grid_description"]["grid_dims"]))
+
+    generation_number = 0
+    while True:
+        if generation_number >= config["GA_MAP_ELITES_NUM_GENERATIONS"]:
+            break
+        
+        # get parent
+        non_empty_cells = b_map.get_non_empty_cells(config)
+        if len(non_empty_cells) == 0:
+            parent_cell = None
+            parent_params = get_random_individual(config)
+            parent_obs_mean = None
+            parent_obs_std = None
+        else:
+            parent_cell = np.random.choice(non_empty_cells)  # NOTE, here goes cell selection method
+            parent_params = parent_cell["params"]
+            parent_obs_mean,parent_obs_std = calculate_obs_stats( parent_params["obs_stats"]["obs_sum"],
+                                                                  parent_params["obs_stats"]["obs_sq"],
+                                                                  parent_params["obs_stats"]["obs_count"])
+
+        # create child
+        child = parent_params + np.random.randn(*parent_params.shape) * config["GA_MUTATION_POWER"]
+        
+        # evaluate child
+        child_f = client.scatter(child,broadcast=True)
+        
+        res = [client.submit(es_update.evaluate_individual,theta=child_f,obs_mean=parent_obs_mean,obs_std=parent_obs_std,eval=True,config=config,
+                             pure=False) for _ in range(10)]
+        res = client.gather(res)
+
+        
+
+
+def run_simple_es_map_elites(config,register_weights_and_biases=False):
+    
+    b_map = behavior_map.Grid_behaviour_map(config)
+    b_archive = novelty_archive.NoveltyArchive(bc_dim = len(config["map_elites_grid_description"]["grid_dims"]))
+
+    generation_number = 0
+    while True:
+        if generation_number >= config["ES_MAP_ELITES_NUM_GENERATIONS"]:
+            break
+
+
 
 def run_map_elites_experiment(config,register_weights_and_biases=False):
   
     b_map = behavior_map.Grid_behaviour_map(config)
     b_archive = novelty_archive.NoveltyArchive(bc_dim = len(config["map_elites_grid_description"]["grid_dims"]))
 
-    # for a few steps, evaluate random individuals, to have a few non empty cells in the map
-    for seed_i in range(config["seeding_steps"]):
-        random_params = get_random_individual(config)
-        
-        fitnesses,bcs = evaluate_individual_multiple_times(random_params,n=50)
-        evaluate_fitness = np.mean(fitnesses)
-        evaluate_bcs = np.mean(bcs,axis=0)
+    ## for a few steps, evaluate random individuals, to have a few non empty cells in the map
+    #for seed_i in range(config["seeding_steps"]):
+    #    random_params = get_random_individual(config)
+    #    
+    #    fitnesses,bcs = evaluate_individual_multiple_times(random_params,n=50)
+    #    evaluate_fitness = np.mean(fitnesses)
+    #    evaluate_bcs = np.mean(bcs,axis=0)
         
         
 
