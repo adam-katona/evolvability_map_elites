@@ -64,8 +64,8 @@ def set_up_weights_and_biases_run(config,run_name):
         
 
 
-def set_up_dask_client():
-    client = Client(n_workers=60, threads_per_worker=1)
+def set_up_dask_client(n_workers=60):
+    client = Client(n_workers=n_workers, threads_per_worker=1)
     def set_up_worker():
         import os
         os.environ["MKL_NUM_THREADS"] = "1" 

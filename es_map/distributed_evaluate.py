@@ -4,7 +4,7 @@ import torch
 
 
 
-
+# evaluate a single theta
 def evaluate_individual(theta,obs_mean,obs_std,eval,config):
     
     # create the env
@@ -25,6 +25,7 @@ def evaluate_individual(theta,obs_mean,obs_std,eval,config):
     }
         
 
+# evaluate a single theta repeatedly
 def evaluate_individual_repeated(theta,obs_mean,obs_std,eval,config,repeat_n=1):
     import time
     now = time.time()
@@ -121,12 +122,12 @@ def ga_evaluate_children_multi_parent(client,parent_datas,config):
     
         child_result = {
             "child" : child,
-            "mean_fitness" : np.mean(results["fitnesses"]),
-            "mean_bc" : np.mean(results["bcs"],axis=0),
+            "mean_fitness" : np.mean([res["fitness"] for res in results]),
+            "mean_bc" : np.mean([res["bc"] for res in results],axis=0),
             
-            "child_obs_sum" : results["obs_sum"],
-            "child_obs_sq" : results["obs_sq"],
-            "child_obs_count" : results["obs_count"],
+            "child_obs_sum" : np.sum([res["obs_sum"] for res in results],axis=0),
+            "child_obs_sq" : np.sum([res["obs_sq"] for res in results],axis=0),
+            "child_obs_count" : np.sum([res["obs_count"] for res in results]),
         }
         final_child_results.append(child_result)
     return final_child_results
