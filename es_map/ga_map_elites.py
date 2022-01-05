@@ -181,13 +181,6 @@ def run_ga_map_elites(client,config,wandb_logging=True):
 
 
 
-###################
-## ES MAP ELITES ##
-###################
-
-def run_es_map_elites(client,config):
-    pass
-
 
 
 

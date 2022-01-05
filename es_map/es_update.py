@@ -55,16 +55,20 @@ example_evaluated_individual = {
         4 : 1.2,
         6 : 1.1,
     }
-    
-    
 }
 
 
 def calculate_behavioural_variance(child_evaluations,config):
-    pass
+    bcs = child_evaluations["bcs"]
+    bc_mean = np.mean(bcs,axis=0)
+    contributions_to_variance = np.sum(((bcs - bc_mean) ** 2),axis=1)
+    evolvability_of_parent = np.mean(contributions_to_variance) # NOTE this is not really a variance, because BC is a vector
+    return evolvability_of_parent                               # it is the summed variance of each component of BC
+    
 
-def calculate_innovativeness(): # innovation is excpected novelty
-    pass
+def calculate_innovativeness(child_evaluations,novelty_archive,config): # innovation is excpected novelty
+    novelties = novelty_archive.calculate_novelty(child_evaluations["bcs"],k_neerest=config["NOVELTY_CALCULATION_NUM_NEIGHBORS"])
+    return np.mean(novelties) # expected novelty of children
 
 def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_archive=None,):
     # novelty_archive is only needed if we want to calculate innovation (for now we always do)
@@ -95,7 +99,7 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
     elif es_update_type == "innovation":
         # for innovation we want to maximize the excpected novelty.
         # for this we want to go towards points which are novel.
-        novelties = novelty_archive.calculate_novelty(child_evaluations["bcs"],k_neerest=10)
+        novelties = novelty_archive.calculate_novelty(child_evaluations["bcs"],k_neerest=config["NOVELTY_CALCULATION_NUM_NEIGHBORS"])
         sorted_indicies = np.argsort(novelties) 
         
         # calculate the innovation, which we define as the excpected novelty of offspring

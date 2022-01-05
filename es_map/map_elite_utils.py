@@ -1,6 +1,11 @@
 import numpy as np
-
-
+import itertools
+        
+def create_id_generator():
+    counter = itertools.count()
+    def get_next_id():
+        return next(counter)
+    return get_next_id
 
 def get_random_individual(config):
     from es_map.interaction import interaction
@@ -31,8 +36,8 @@ def plot_4d_map(b_map,metric="eval_fitness",plt_inline_mode=False):
     data_4d = []
     for val in b_map.data.reshape(-1):
         if val is not None:
-            if val[metric] is not None:
-                data_4d.append(val[metric])
+            if val["elite"][metric] is not None:
+                data_4d.append(val["elite"][metric])
             else:
                 data_4d.append(None)
         else:
