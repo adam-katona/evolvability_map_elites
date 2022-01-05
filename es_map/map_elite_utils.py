@@ -27,7 +27,35 @@ def rank_based_selection(num_parent_candidates,num_children,agressiveness=1.0):
     selected_indicies = np.random.choice(num_parent_candidates,size=num_children, replace=True, p=p)
     return selected_indicies
 
+def plot_4d_map(b_map,metric="eval_fitness",plt_inline_mode=False):
+    data_4d = []
+    for val in b_map.data.reshape(-1):
+        if val is not None:
+            if val[metric] is not None:
+                data_4d.append(val[metric])
+            else:
+                data_4d.append(None)
+        else:
+            data_4d.append(None)
+    data_4d = np.array(data_4d).reshape(*b_map.data.shape)
+    
+    dim = b_map.data.shape
+    data_2d = np.zeros([dim[0]*dim[2],dim[1]*dim[3]])
+    for coord1 in range(dim[0]):
+        for coord2 in range(dim[1]):
+            data_2d[coord1*dim[2]:(coord1+1)*dim[2],coord2*dim[3]:(coord2+1)*dim[3]] = data_4d[coord1,coord2]
 
+    if plt_inline_mode is True:
+        import matplotlib.pyplot as plt
+        plt.imshow(data_2d)
+        plt.colorbar()
+    else:
+        import matplotlib.pyplot as plt
+        fig,ax = plt.subplots()
+        ax.imshow(data_2d)
+        #ax.colorbar()
+    
+        return fig,ax
 
 
 

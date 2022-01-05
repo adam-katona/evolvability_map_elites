@@ -43,19 +43,19 @@ def evaluate_individual_repeated(theta,obs_mean,obs_std,eval,config,repeat_n=1):
     for _ in range(repeat_n):
         total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count = env.rollout(
             theta,random_state=np.random.RandomState(),eval=eval, obs_mean=obs_mean, obs_std=obs_std, render=False)
-        fitnesses.apped(total_return)
-        lengths.apped(length)
-        bcs.apped(bc)
-        all_obs_sum.apped(obs_sum)
-        all_obs_sq.apped(obs_sq)
-        all_obs_count.apped(obs_count)
+        fitnesses.append(total_return)
+        lengths.append(length)
+        bcs.append(bc)
+        all_obs_sum.append(obs_sum)
+        all_obs_sq.append(obs_sq)
+        all_obs_count.append(obs_count)
     
     elapsed = time.time() - now
 
     return {
-        "fitnesses" : fitnesses,
-        "length" : lengths,
-        "bc" : bcs,
+        "fitness" : np.mean(fitnesses),
+        "length" : np.mean(lengths),
+        "bc" : np.mean(bcs,axis=0),
 
         "obs_sum" : np.sum(obs_sum,axis=0),
         "obs_sq" :  np.sum(obs_sq,axis=0),
