@@ -5,14 +5,14 @@ import torch
 
 
 # evaluate a single theta
-def evaluate_individual(theta,obs_mean,obs_std,eval,config):
+def evaluate_individual(theta,obs_mean,obs_std,use_action_noise,record_obs,config):
     
     # create the env
     from es_map.interaction import interaction
     env = interaction.build_interaction_module(config["env_id"],config)
 
     total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count = env.rollout(
-        theta,random_state=np.random.RandomState(),eval=eval, obs_mean=obs_mean, obs_std=obs_std, render=False)
+        theta,random_state=np.random.RandomState(),use_action_noise=use_action_noise,record_obs=record_obs, obs_mean=obs_mean, obs_std=obs_std, render=False)
     
     return {
         "fitness" : total_return,
@@ -26,7 +26,7 @@ def evaluate_individual(theta,obs_mean,obs_std,eval,config):
         
 
 # evaluate a single theta repeatedly
-def evaluate_individual_repeated(theta,obs_mean,obs_std,eval,config,repeat_n=1):
+def evaluate_individual_repeated(theta,obs_mean,obs_std,use_action_noise,record_obs,config,repeat_n=1):
     import time
     now = time.time()
     
@@ -42,7 +42,7 @@ def evaluate_individual_repeated(theta,obs_mean,obs_std,eval,config,repeat_n=1):
     
     for _ in range(repeat_n):
         total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count = env.rollout(
-            theta,random_state=np.random.RandomState(),eval=eval, obs_mean=obs_mean, obs_std=obs_std, render=False)
+            theta,random_state=np.random.RandomState(),use_action_noise=use_action_noise,record_obs=record_obs, obs_mean=obs_mean, obs_std=obs_std, render=False)
         fitnesses.append(total_return)
         lengths.append(length)
         bcs.append(bc)
@@ -85,7 +85,7 @@ def evaluate_children_remote(noise_descriptors,central_theta,obs_mean,obs_std,co
             params.append(central_theta+mutation)
     
     returns, lengths, bcs, final_xpos, obs_sum, obs_sq, obs_count = env.rollout_batch(
-                                        params,batch_size=len(params),random_state=np.random.RandomState(),eval=False,
+                                        params,batch_size=len(params),random_state=np.random.RandomState(),use_action_noise=True,record_obs=True,
                                         obs_mean=obs_mean, obs_std=obs_std, render=False)
     
     elapsed = time.time() - now
@@ -101,6 +101,11 @@ def evaluate_children_remote(noise_descriptors,central_theta,obs_mean,obs_std,co
         "elapsed_time" : elapsed,
     }
     
+    
+    
+    
+    
+    
 # recieve parent list, and create and evaluate a child for each of them. Does not use random table indicies.
 def ga_evaluate_children_multi_parent(client,parent_datas,config):
     # here there is no point using a random table, since every individual is different.
@@ -112,7 +117,7 @@ def ga_evaluate_children_multi_parent(client,parent_datas,config):
     for theta,obs_mean,obs_std in parent_datas:
         
         child = theta + np.random.randn(theta.size) * config["GA_MUTATION_POWER"] 
-        child_results = [client.submit(evaluate_individual,theta=child,obs_mean=obs_mean,obs_std=obs_std,eval=False,config=config,pure=False) 
+        child_results = [client.submit(evaluate_individual,theta=child,obs_mean=obs_mean,obs_std=obs_std,use_action_noise=True,record_obs=True,config=config,pure=False) 
                                         for _ in range(config["GA_NUM_EVALUATIONS"])]
         all_children_results.append(child_results)
         all_children.append(child)
@@ -134,11 +139,13 @@ def ga_evaluate_children_multi_parent(client,parent_datas,config):
         
         
 # create and evaluate children of a single parent, using random table indicies
-def ga_evaluate_children_single_parent(client,theta,obs_mean,obs_std,config):
+def ga_evaluate_children_single_parent(client,theta,obs_mean,obs_std,config,num_children=None,num_evaluation_per_children=None):
     from es_map import random_table
     
-    num_children = config["GA_CHILDREN_PER_GENERATION"]
-    num_evaluation_per_children = config["GA_NUM_EVALUATIONS"]
+    if num_children is None:
+        num_children = config["GA_CHILDREN_PER_GENERATION"]
+    if num_evaluation_per_children is None:
+        num_evaluation_per_children = config["GA_NUM_EVALUATIONS"]
     
     random_table_indicies = random_table.get_random_indicies(param_dim=theta.size,num_indicies=num_children)
     child_list = [[(rand_i,1)] for rand_i in random_table_indicies] # (rand_index,direction) not used for ga, but keep it so i can have 1 evaluate child function

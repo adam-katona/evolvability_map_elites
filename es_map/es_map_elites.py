@@ -6,9 +6,13 @@ from es_map import distributed_evaluate
 from es_map.interaction import interaction
 from es_map import behavior_map
 from es_map import novelty_archive
+from es_map import nd_sort
 
 import random
 import numpy as np
+import copy
+import pickle
+import json
 
 import wandb
 
@@ -17,14 +21,16 @@ import wandb
 ###################
 
 def run_es_map_elites_single_map(client,config,wandb_logging=True):
-    pass
-
     print("staring run_es_map_elites_single_map")
     
     if type(config) != type(dict()):
         config = config.as_dict()
+        
+    # TODO HACK this should be set elswhere properly
+    from es_map import submission_common
+    config["map_elites_grid_description"] = submission_common.get_bc_descriptor_for_env(config["env_id"])
     
-    DEBUG = True
+    DEBUG = False
     if DEBUG is True:
         config["ES_NUM_GENERATIONS"] = 15
         config["ES_popsize"] = 12
@@ -44,11 +50,27 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
     best_fitness_so_far = 0
     best_model_so_far = None
     best_evolvability_so_far = 0
+    obs_stats_history = []
     
     get_next_individual_id = map_elite_utils.create_id_generator()
     
-    b_map = behavior_map.Grid_behaviour_map(config)
+    if config["BMAP_type_and_metrics"]["type"] == "single_map":
+        b_map = behavior_map.Grid_behaviour_map(config)
+    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+        b_map = behavior_map.Grid_behaviour_map(config)
+    elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        b_map = behavior_map.Grid_behaviour_multi_map(config)
+    else:
+        raise "Unknown BMAP_type"
+        
+    
     b_archive = novelty_archive.NoveltyArchive(bc_dim = len(config["map_elites_grid_description"]["grid_dims"]))
+    obs_shape = map_elite_utils.get_obs_shape(config)
+    observation_stats = {                  # this is a single obs stats to keep track of during the whole experiment. 
+        "sum" : np.zeros(obs_shape),       # This is always expanded, and always used to calculate the current mean and std
+        "sumsq" : np.zeros(obs_shape),
+        "count" : 0,
+    }
     
     while True:
         if generation_number >= config["ES_NUM_GENERATIONS"]:
@@ -57,11 +79,11 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
             
         non_empty_cells = b_map.get_non_empty_cells()
         
-        
         ##############################################
         ## Populate the map with random individuals ##
         ##############################################
         if len(non_empty_cells) == 0: # no parent available
+            current_obs_mean,current_obs_std = map_elite_utils.calculate_obs_stats(observation_stats)   
             for _ in range(config["ES_NUM_INITIAL_RANDOM_INDIVIDUALS_TO_POPULATE_MAP"]):
                 print("CREATING RANDOM INDIVIDUAL")
                 new_individual_params = map_elite_utils.get_random_individual(config)
@@ -70,61 +92,42 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 # but we maybe should calculate evolvability and innovation so we can compare them to the other algos
 
                 eval_results = distributed_evaluate.evaluate_individual_repeated(theta=new_individual_params,
-                                                                obs_mean=None,obs_std=None,eval=True,
+                                                                obs_mean=current_obs_mean,obs_std=current_obs_std,use_action_noise=False,record_obs=False,  # not using action noise for evaluation runs, also not recording obs stats
                                                                 config=config,repeat_n=config["ES_CENTRAL_NUM_EVALUATIONS"])
 
-                # TODO, maybe also evaluate children to get evolvability
-                
-                # insert the new individual in the map
-                map_coords = b_map.get_cell_coords(eval_results["bc"])
-
-                needs_adding = False
-                if b_map.data[map_coords] is None:
-                    needs_adding = True
-                elif b_map.data[map_coords]["elite"]["eval_fitness"] < eval_results["fitness"]:
-                    needs_adding = True
-                
-                if needs_adding is True:      
-                    new_individual = {
-                        "params" : new_individual_params,
-                        "ID" : get_next_individual_id(),
-                        "parent_ID" : None,
-                        "generation_created" : generation_number,
-                        
-                        "child_eval" : None, # TODO
-                        
-                        "eval_fitness" : eval_results["fitness"],
-                        "eval_bc" : eval_results["bc"],
-                        
-                        "obs_stats" : {  
-                            "obs_sum" : None,  # TODO handle obs stats
-                            "obs_sq" : None,
-                            "obs_count" : None,
-                        },
-                        
-                        "evolvability" : None,
-                        "innovation" : None,
-
-                        "innovation_over_time" : None,  # innovation decreases over time, as we add new individuals to the archive
-                        #{  
-                        #    generation_number : innovation_at_generation,
-                        #    generation_number : innovation_at_generation,
-                        #},
-                    }
+                # TODO, also evaluate children to get evolvability, especially if evolvability is out metric...
+                     
+                new_individual = {
+                    "params" : new_individual_params,
+                    "ID" : get_next_individual_id(),
+                    "parent_ID" : None,
+                    "generation_created" : generation_number,
                     
-                    new_cell = {
-                        "elite" : new_individual
-                    }
-                    b_map.data[map_coords] = new_cell
+                    "child_eval" : None, # TODO
                     
-                    if new_individual["eval_fitness"] > best_fitness_so_far:
-                        best_fitness_so_far = new_individual["eval_fitness"]
-                
+                    "eval_fitness" : eval_results["fitness"],
+                    "eval_bc" : eval_results["bc"],
+                    
+                    "evolvability" : None,
+                    "innovation" : None,
+
+                    "innovation_over_time" : None,  # innovation decreases over time, as we add new individuals to the archive
+                    #{  
+                    #    generation_number : innovation_at_generation,
+                    #    generation_number : innovation_at_generation,
+                    #},
+                }
+                if new_individual["eval_fitness"] > best_fitness_so_far:
+                    best_fitness_so_far = new_individual["eval_fitness"]
+                    
+                map_elite_utils.try_insert_individual_in_map(new_individual,b_map,b_archive,config)
         
         ######################
         ## PARENT SELECTION ##
         ######################
         else:
+            ##### TODO parent selection for the differnt b_map types
+            
             if config["ES_PARENT_SELECTION_MODE"] == "uniform":
                 parent_cell = np.random.choice(non_empty_cells)  # NOTE, here goes cell selection method
             elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
@@ -143,15 +146,20 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 
             for update_step_i in range(config["ES_STEPS_UNTIL_NEW_PARENT_SELECTION"]):
                 print("new update started")
+                current_obs_mean,current_obs_std = map_elite_utils.calculate_obs_stats(observation_stats)  
                 
                 #######################
                 ## EVALUATE CHILDREN ##
                 #######################
                 # does this cell already have cached evaluations?, then we can reuse it
                 if current_individual["child_eval"] is None:  # maybe this should never happen, we will see
-                    #current_individual -> obs_mean,obs_std # TODO
-                    obs_mean,obs_std = None,None
-                    current_individual["child_eval"] = distributed_evaluate.es_evaluate_children(client,current_individual["params"],obs_mean,obs_std,config)
+                    current_individual["child_eval"] = distributed_evaluate.es_evaluate_children(client,current_individual["params"],obs_mean=current_obs_mean,
+                                                                                                                                     obs_std=current_obs_std,config=config)
+                    # record the observation stats
+                    observation_stats["sum"] += current_individual["child_eval"]["child_obs_sum"]
+                    observation_stats["sumsq"] += current_individual["child_eval"]["child_obs_sq"]
+                    observation_stats["count"] += current_individual["child_eval"]["child_obs_count"]
+                    current_obs_mean,current_obs_std = map_elite_utils.calculate_obs_stats(observation_stats)
                     
                     
                 ##################
@@ -173,16 +181,21 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 ############################
                 
                 updated_eval_results = distributed_evaluate.evaluate_individual_repeated(theta=updated_theta,
-                                                                obs_mean=None,obs_std=None,eval=True,
+                                                                obs_mean=current_obs_mean,obs_std=current_obs_std,use_action_noise=False,record_obs=False,
                                                                 config=config,repeat_n=config["ES_CENTRAL_NUM_EVALUATIONS"])
                 
                 ##################################
                 ## EVALUATE CHILDREN OF UPDATED ##
                 ##################################
                 
-                updated_child_eval = distributed_evaluate.es_evaluate_children(client,updated_theta,obs_mean=None,obs_std=None,config=config)
+                updated_child_eval = distributed_evaluate.es_evaluate_children(client,updated_theta,obs_mean=current_obs_mean,obs_std=current_obs_std,config=config)
                 updated_evolvability = es_update.calculate_behavioural_variance(updated_child_eval,config)
                 updated_innovation = es_update.calculate_innovativeness(updated_child_eval,b_archive,config)
+                
+                # record the observation stats
+                observation_stats["sum"] += updated_child_eval["child_obs_sum"]
+                observation_stats["sumsq"] += updated_child_eval["child_obs_sq"]
+                observation_stats["count"] += updated_child_eval["child_obs_count"]
                 
                 new_individual = {
                     "params" : updated_theta,  # 1d torch tensor containing the parameters 
@@ -194,12 +207,6 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
 
                     "eval_fitness" : updated_eval_results["fitness"],
                     "eval_bc" : updated_eval_results["bc"],
-
-                    "obs_stats" : {   # TODO
-                        "obs_sum" : None,
-                        "obs_sq" : None,
-                        "obs_count" : None,
-                    },
 
                     "evolvability" : updated_evolvability,
                     "innovation" : updated_innovation,
@@ -221,18 +228,12 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 # Weather or not we insert it, we add it to the behavior archive
                 b_archive.add_to_archive(new_individual["eval_bc"])
                 
-                map_coords = b_map.get_cell_coords(new_individual["eval_bc"])
-                if b_map.data[map_coords] is None:
-                    new_cell = { "elite" : new_individual }
-                    b_map.data[map_coords] = new_cell
-                elif b_map.data[map_coords]["elite"]["eval_fitness"] < new_individual["eval_fitness"]:
-                    b_map.data[map_coords]["elite"] = new_individual 
+                map_elite_utils.try_insert_individual_in_map(new_individual,b_map,b_archive,config)
                     
                 ################################
                 ## PREPARE FOR NEXT ITERATION ##
                 ################################
                 current_individual = new_individual
-                
                 
                 ########################
                 ## EVERY STEP LOGGING ##
@@ -241,11 +242,15 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 non_empty_cells = b_map.get_non_empty_cells()
                 print(generation_number,len(non_empty_cells),best_fitness_so_far)
 
+                qd_score = map_elite_utils.calculate_qd_score(b_map,config) 
+
                 # Do the step logging 
                 step_logs = {
                     "generation_number" : generation_number,
+                    "evaluations_so_far" : generation_number*config["ES_popsize"],
                     "nonempty_cells" : len(non_empty_cells),
                     "nonempty_ratio" : float(len(non_empty_cells)) / b_map.data.size,
+                    "qd_score" : qd_score,
                     "best_fitness_so_far" : best_fitness_so_far,
                     "best_evolvability_so_far" : best_evolvability_so_far,
                     "current_children_fitness_mean" : np.mean(new_individual["child_eval"]["fitnesses"]),
@@ -264,13 +269,16 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 # Do the n-step logging
                 if generation_number % config["PLOT_FREQUENCY"] == 10:
                     # do plot map
-                    # save map without heavy stuff???
-                    fig_f,ax = map_elite_utils.plot_4d_map(b_map,metric="eval_fitness")
-                    fig_evo,ax = map_elite_utils.plot_4d_map(b_map,metric="evolvability")
+                    fig_f,ax = map_elite_utils.plot_b_map(b_map,metric="eval_fitness")
                     n_step_log = {
+                        "generation_number" : generation_number,
+                        "evaluations_so_far" : generation_number*config["ES_popsize"],
                         "b_map_plot" : fig_f,
-                        "b_map_evolvability_plot" : fig_evo, 
                     }
+                    #if "evolvability" in config["BMAP_type_and_metrics"]["metrics"]: # actually not need metric to record evolvability
+                    fig_evo,ax = map_elite_utils.plot_b_map(b_map,metric="evolvability")
+                    n_step_log["b_map_evolvability_plot"] = fig_evo
+                    
                     if wandb_logging is True:
                         wandb.log(n_step_log)
 
@@ -287,6 +295,9 @@ def run_es_map_elites_single_map(client,config,wandb_logging=True):
                 if generation_number % config["CHECKPOINT_FREQUENCY"] == 10:
                     np.save(run_checkpoint_path+"/b_map.npy",b_map.data,allow_pickle=True)
                     b_archive.save_to_file(run_checkpoint_path+"/b_archive.npy")
+                    obs_stats_history.append(copy.deepcopy(observation_stats))
+                    with open(run_checkpoint_path+'/obs_stats.pickle', 'wb') as handle:
+                        pickle.dump(obs_stats_history, handle, protocol=pickle.HIGHEST_PROTOCOL)
                     
             
                 generation_number += 1

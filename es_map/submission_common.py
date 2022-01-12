@@ -33,10 +33,62 @@ def set_up_dask_client(n_workers=50):
     print("worker setup done")
     return client
 
+def get_bc_descriptor_for_env(env_id):
+    if 'HumanoidDeceptive' in env_id:
+        return {
+            "bc_limits" : [[-50, 50], [-50, 50]],
+            "grid_dims" : [91,91],
+        }
+    elif 'AntMaze' in env_id:
+        return {
+            "bc_limits" : [[-40, 40], [-40, 40]],
+            "grid_dims" : [10,10],
+        }
+    elif 'DamageAnt' in env_id:
+        return {
+            "bc_limits" : [[0,1],[0,1],[0,1],[0,1]],
+            "grid_dims" : [10,10,10,10],
+        }
+    elif 'QDAntBulletEnv' in env_id:
+        return {
+            "bc_limits" : [[0,1],[0,1],[0,1],[0,1]],
+            "grid_dims" : [6,6,6,6],
+        }
+    elif 'QDWalker2DBulletEnv' in env_id:
+        return {
+            "bc_limits" : [[0,1],[0,1]],
+            "grid_dims" : [32,32],
+        }
+    elif 'QDHalfCheetahBulletEnv' in env_id:
+        return {
+            "bc_limits" : [[0,1],[0,1]],
+            "grid_dims" : [32,32],
+        }
+    elif 'QDHopperBulletEnv' in env_id:
+        return {
+            "bc_limits" : [[0,1]],
+            "grid_dims" : [1000],
+        }
+    else:
+        raise "Error, dont know bc dims for env"
+       
+
 def setup_wandb(config_defaults,project_name):
+    
+    
+    import types
+    if isinstance(wandb.config, types.FunctionType):
+        # wandb config is a function, which means wandb is not inited, we are not in a sweep
+        config_defaults["map_elites_grid_description"] = get_bc_descriptor_for_env(config_defaults["env_id"])
+    else:
+        config_defaults["map_elites_grid_description"] = get_bc_descriptor_for_env(wandb.config["env_id"])
+    
+    print(config_defaults["map_elites_grid_description"])
+    
     wandb.init(project=project_name, entity="adam_katona",config=config_defaults,dir="/scratch/ak1774/runs") # this is a bit vauge how this happens but default will not set values already set by a sweep
     config = wandb.config
     print(config)
+    
     
     run_name = wandb.run.dir.split("/")[-2]
     run_checkpoint_path = "/scratch/ak1774/runs/large_files/" + run_name

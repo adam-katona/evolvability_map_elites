@@ -30,9 +30,16 @@ def run_ga_map_elites(client,config,wandb_logging=True):
             
         config["GA_CHILDREN_PER_GENERATION"] = 20
         config["GA_NUM_EVALUATIONS"] = 4
-    
+        
     b_map = behavior_map.Grid_behaviour_map(config)
     b_archive = novelty_archive.NoveltyArchive(bc_dim = len(config["map_elites_grid_description"]["grid_dims"]))
+    
+    obs_shape = map_elite_utils.get_obs_shape(config)
+    observation_stats = {  # this is a single obs stats to keep track of during the whole experiment. 
+        "sum" : np.zeros(obs_shape),       # This is always expanded, and always used to calculate the current mean and std
+        "sumsq" : np.zeros(obs_shape),
+        "count" : 0,
+    }
     
     if wandb_logging is True:   
         run_name = wandb.run.dir.split("/")[-2]
@@ -57,6 +64,8 @@ def run_ga_map_elites(client,config,wandb_logging=True):
             print("Done, reached iteration: ",config["GA_MAP_ELITES_NUM_GENERATIONS"])
             break
         
+        current_obs_mean,current_obs_std = map_elite_utils.calculate_obs_stats(observation_stats)   
+        
         ##########################################
         ## SELECT PARENTS AND EVALUATE_CHILDREN ##
         ##########################################
@@ -64,10 +73,10 @@ def run_ga_map_elites(client,config,wandb_logging=True):
         
         # single perent mode, this was used in original es map elites implementation (also normal map elites)
         if config["GA_MULTI_PARENT_MODE"] is False:
-            parent_params,parent_obs_mean,parent_obs_std = map_elite_utils.ga_select_parent_single_mode(non_empty_cells,config)
+            parent_params = map_elite_utils.ga_select_parent_single_mode(non_empty_cells,config)
             child_results = distributed_evaluate.ga_evaluate_children_single_parent(client,theta=parent_params,
-                                                                                    obs_mean=parent_obs_mean,
-                                                                                    obs_std=parent_obs_std,
+                                                                                    obs_mean=current_obs_mean,
+                                                                                    obs_std=current_obs_std,
                                                                                     config=config)
         else:
             parent_datas = map_elite_utils.ga_select_parents_multi_parent_mode(non_empty_cells,config)
@@ -77,6 +86,11 @@ def run_ga_map_elites(client,config,wandb_logging=True):
         ## DECIDE IF CHILDREN NEEDS TO BE ADDED TO ARCHIVE ## 
         #####################################################
         for child_res in child_results:
+            
+            # record the observation stats
+            observation_stats["sum"] += child_res["child_obs_sum"]
+            observation_stats["sumsq"] += child_res["child_obs_sq"]
+            observation_stats["count"] += child_res["child_obs_count"]
             
             mean_fitness = child_res["mean_fitness"]
             mean_bc = child_res["mean_bc"]
@@ -103,12 +117,6 @@ def run_ga_map_elites(client,config,wandb_logging=True):
 
                     "eval_fitness" : mean_fitness,
                     "eval_bc" : mean_bc,
-
-                    "obs_stats" : {   # used for observation normalization. These stats are used for the children as well ??
-                        "obs_sum" : child_res["child_obs_sum"],
-                        "obs_sq" : child_res["child_obs_sq"],
-                        "obs_count" : child_res["child_obs_count"],
-                    },
                 }
             b_map.data[coords] = updated_cell
         

@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import gym
 from es_map.interaction import custom_gym
+import QDgym_noprint
 
 """
 Class containing the policy. 
@@ -57,7 +58,7 @@ class ControllerAndEnv:
         self.shapes = [(self.input_size, self.layer_1),
                        (self.layer_1, self.layer_2),
                        (self.layer_2, self.output_size)]
-        self.action_noise = float(args['policy_args']['action_noise'])
+        self.action_noise_std = float(args['policy_args']['action_noise'])  # this is no supplied directly to simulate.
         self.use_norm_obs = args['env_args']['use_norm_obs']
 
         if  args['policy_args']['activation'] == 'tanh':
@@ -134,7 +135,7 @@ class ControllerAndEnv:
         return np.asarray(random_params, dtype=np.float32)
 
 
-def simulate(theta, model, max_episode_length, seed, train_mode=False,
+def simulate(theta, model, max_episode_length, seed, use_action_noise=False,record_obs=False,
              render=False):
 
     # set the parameters to run in the controller class
@@ -147,18 +148,11 @@ def simulate(theta, model, max_episode_length, seed, train_mode=False,
         np.random.seed(seed)
         model.env.seed(seed)
 
-    if model.use_norm_obs:
-        running_stats = RunningStat(model.env.observation_space.shape)
-
     obs = model.env.reset()
 
-    # track obs stats, but not every rollout for computation efficiency
-    record_obs = False
-    if model.use_norm_obs and train_mode:
-        if np.random.rand() < 0.01:
-            record_obs = True
-            all_obs = [obs]
-
+    if record_obs is True:
+        all_obs = [obs]
+    
     total_reward = 0.0
     final_pos = None
     t = 0
@@ -175,9 +169,9 @@ def simulate(theta, model, max_episode_length, seed, train_mode=False,
         action = model.get_action(obs)
 
         # add action noise
-        if train_mode and model.action_noise != 0:
-            action += np.random.randn(action.size) * model.action_noise
-
+        if use_action_noise is True:
+             action += np.random.randn(action.size) * model.action_noise_std
+            
         # make step in env
         obs, reward, done, info = model.env.step(action)
 
@@ -206,14 +200,10 @@ def simulate(theta, model, max_episode_length, seed, train_mode=False,
         sum_obs = all_obs.sum(axis=0)
         count = all_obs.shape[0]
         sum_obs_sq = np.square(all_obs).sum(axis=0)
-        running_stats.increment(sum_obs, sum_obs_sq, count)
-
-    if model.use_norm_obs:
-        sum = running_stats.sum
-        sumsq = running_stats.sumsq
-        count = running_stats.count
     else:
-        sum = sumsq = count = None
+        sum_obs = np.zeros_like(obs)
+        sum_obs_sq = np.zeros_like(obs)
+        count = 0
 
-    return total_reward, t, bc, final_pos, sum, sumsq, count, imgs
+    return total_reward, t, bc, final_pos, sum_obs, sum_obs_sq, count, imgs
 

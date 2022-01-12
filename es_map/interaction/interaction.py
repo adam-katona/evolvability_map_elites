@@ -35,7 +35,7 @@ class Interaction:
     def env(self):
         return self.model.env
 
-    def rollout(self, theta, random_state, eval=False, obs_mean=None, obs_std=None, render=False):
+    def rollout(self, theta, random_state, use_action_noise=False,record_obs=False, obs_mean=None, obs_std=None, render=False):
 
         # update obs stats from master
         if self.model.use_norm_obs:
@@ -45,7 +45,8 @@ class Interaction:
         total_return, length, bc, final_xpos, obs_sum, obs_sq, obs_count, imgs = simulate(theta,
                                                                                     self.model,
                                                                                     max_episode_length=self.max_episode_length,
-                                                                                    train_mode=not eval,
+                                                                                    use_action_noise=use_action_noise,
+                                                                                    record_obs=record_obs,
                                                                                     seed=seed,
                                                                                     render=render)
 
@@ -55,7 +56,7 @@ class Interaction:
 
 
 
-    def rollout_batch(self, thetas, batch_size, random_state, eval=False,
+    def rollout_batch(self, thetas, batch_size, random_state, use_action_noise=False,record_obs=False,
                       obs_mean=None, obs_std=None, render=False):
         import numpy as np
         returns = np.zeros(batch_size)
@@ -65,7 +66,8 @@ class Interaction:
         for i, theta in enumerate(thetas):
             returns[i], lengths[i], bcs[i], final_xpos[i], obs_sum, obs_sq, obs_count = self.rollout(theta,
                                                                                                      random_state=random_state,
-                                                                                                     eval=eval,
+                                                                                                     use_action_noise=use_action_noise,
+                                                                                                     record_obs=record_obs,
                                                                                                      obs_mean=obs_mean,
                                                                                                      obs_std=obs_std,
                                                                                                      render=render)
@@ -105,6 +107,22 @@ class Ant(Interaction):
         self.nb_cells_per_dimension = 10
         self.max_episode_length = 1000
 
+class QDEnv(Interaction):
+    def __init__(self, args):
+        import gym
+        import QDgym
+        tmp_env = gym.make(args["env_id"])
+        args['policy_args']['input_size'] = tmp_env.observation_space.shape[0]
+        args['policy_args']['output_size'] = tmp_env.action_space.shape[0]   
+        Interaction.__init__(self, args)
+        #self.dim_bc = 4
+        #self.min_max_bcs = [[0, 1]] * 4
+        #self.nb_cells_per_dimension = 10
+        self.max_episode_length = tmp_env._max_episode_steps 
+
+
+
+
 
 def build_interaction_module(env_id, args):
    if 'HumanoidDeceptive' in env_id:
@@ -113,5 +131,7 @@ def build_interaction_module(env_id, args):
         return AntMaze(args=args)
    elif 'DamageAnt' in env_id:
        return Ant(args=args)
+   elif 'QD' in env_id:
+       return QDEnv(args=args)
    else:
        raise NotImplementedError

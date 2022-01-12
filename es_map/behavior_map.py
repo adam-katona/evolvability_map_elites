@@ -36,7 +36,7 @@ def _get_cell_coords(bc,config):
 # - nd_sorted map
 
 def create_b_map_grid(config):
-    if config["BMAP_type_and_metrics"][0] == "multi_map":
+    if config["BMAP_type_and_metrics"]["type"] == "multi_map":
         return Grid_behaviour_multi_map(config)
     else:
         return Grid_behaviour_map(config)
@@ -47,7 +47,7 @@ class Grid_behaviour_map:
     def __init__(self,config):
         self.config = config
         # sanity check
-        b_map_type = config["BMAP_type_and_metrics"][0]
+        b_map_type = config["BMAP_type_and_metrics"]["type"]
         if b_map_type == "multi_map":
             raise "ERROR, using the wrong kind of grid class"
         
@@ -66,8 +66,8 @@ class Grid_behaviour_map:
 class Grid_behaviour_multi_map:
     def __init__(self,config):
         self.config = config
-        self.b_map_type = config["BMAP_type_and_metrics"][0]
-        self.b_map_metrics = config["BMAP_type_and_metrics"][1]
+        self.b_map_type = config["BMAP_type_and_metrics"]["type"]
+        self.b_map_metrics = config["BMAP_type_and_metrics"]["metrics"]
         self.num_metrics = len(self.b_map_metrics)
         
         if self.b_map_type != "multi_map":
