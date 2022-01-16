@@ -1,8 +1,8 @@
 
 import numpy as np
+import functools
 
-
-def nd_sort_get_first_front(fitnesses)
+def nd_sort_get_first_front(fitnesses):
 
     fronts = calculate_pareto_fronts(fitnesses)
     nondomination_rank_dict = fronts_to_nondomination_rank(fronts)
@@ -98,6 +98,7 @@ def calculate_crowding_metrics(fitnesses,fronts):
         min_val = np.min(fitnesses[:,objective_i])
         max_val = np.max(fitnesses[:,objective_i])
         val_range = max_val - min_val
+        val_range = max(val_range,0.001)
         normalized_fitnesses[:,objective_i] = (fitnesses[:,objective_i] - min_val) / val_range
     
     fitnesses = normalized_fitnesses

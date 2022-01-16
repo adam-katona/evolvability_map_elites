@@ -11,6 +11,7 @@ import numpy as np
 import copy
 import pickle
 import json
+import matplotlib.pyplot as plt
 
 import wandb
 
@@ -64,10 +65,12 @@ def get_individual_elite_mapping_performance(client,theta,b_map_cumm,obs_mean,ob
     cumm_qd_score = np.sum([cell["elite"]["eval_fitness"] for cell in cumm_non_empty_cells])
     
     # also do some plots
-    fig_f,ax = map_elite_utils.plot_b_map(b_map,metric="eval_fitness")
-    fig_f_cumm,ax = map_elite_utils.plot_b_map(b_map_cumm,metric="eval_fitness")             
+    fig_f,ax = map_elite_utils.plot_b_map(b_map,metric="eval_fitness",config=config)
+    fig_f_cumm,ax = map_elite_utils.plot_b_map(b_map_cumm,metric="eval_fitness",config=config)             
     
     # also plot how fast they accumulate
+    b_map_fillup_data = np.array(b_map_fillup_data) / float(b_map.data.size)
+    b_map_cumm_fillup_data = np.array(b_map_cumm_fillup_data) / float(b_map.data.size)
     fig_accumulation,ax = plt.subplots()
     ax.plot(b_map_fillup_data)
     ax.plot(b_map_cumm_fillup_data)
@@ -130,6 +133,7 @@ def run_plain_es(client,config,wandb_logging=True):
     best_model_so_far = None
     best_evolvability_so_far = 0
     obs_stats_history = []
+    optim_state=None
     b_map_cumm = behavior_map.Grid_behaviour_map(config) # this is only used to measure and plot, no role in the algo
     
     while True:
@@ -147,11 +151,11 @@ def run_plain_es(client,config,wandb_logging=True):
         observation_stats["count"] += child_evals["child_obs_count"]
         current_obs_mean,current_obs_std = map_elite_utils.calculate_obs_stats(observation_stats)
         
-        updated_theta = es_update.es_update(theta,child_evals,config,es_update_type=config["ES_UPDATES_MODES_TO_USE"][0],
-                                            novelty_archive=b_archive)
+        updated_theta,optim_state = es_update.es_update(theta,child_evals,config,es_update_type=config["ES_UPDATES_MODES_TO_USE"][0],
+                                            novelty_archive=b_archive,optimizer_state=optim_state)
                 
-        current_evolvability = es_update.calculate_behavioural_variance(child_evals,config)
-        current_innovation = es_update.calculate_innovativeness(child_evals,b_archive,config)
+        current_evolvability = map_elite_utils.calculate_behavioural_variance(child_evals,config)
+        current_innovation = map_elite_utils.calculate_innovativeness(child_evals,b_archive,config)
         
         eval_results = distributed_evaluate.evaluate_individual_repeated(theta=theta,
                                                                 obs_mean=current_obs_mean,obs_std=current_obs_std,use_action_noise=False,record_obs=False,
@@ -171,7 +175,9 @@ def run_plain_es(client,config,wandb_logging=True):
             map_perf["generation_number"] = generation_number
             num_eval_per_measure = config["FILL_MAP_WITH_OFFSPRING_NUM_CHILDREN"] * config["ES_CENTRAL_NUM_EVALUATIONS"]
             map_perf["evaluations_so_far"] = generation_number*config["ES_popsize"] + num_eval_per_measure
-            print(json.dumps(map_perf,indent=4))
+            
+            non_plot_stats = {key : val for key,val in map_perf.items() if "plot" not in key}
+            print(json.dumps(non_plot_stats,indent=4))
             
             if wandb_logging is True:
                 wandb.log(map_perf)

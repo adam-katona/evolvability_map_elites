@@ -79,7 +79,7 @@ class Grid_behaviour_multi_map:
     def get_cell_coords(self,bc,metric):
         coords = _get_cell_coords(bc,self.config)
         channel_i = self.get_metric_index(metric)
-        return [channel_i,*coords]
+        return tuple([channel_i,*coords])
             
     
     def get_metric_index(self,metric):

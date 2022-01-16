@@ -151,6 +151,10 @@ def simulate(theta, model, max_episode_length, seed, use_action_noise=False,reco
     obs = model.env.reset()
 
     if record_obs is True:
+        if random.random() > 0.05: # 5% chance to record obs, that is 100 episodes with 2000 pop size
+            record_obs = False
+
+    if record_obs is True:
         all_obs = [obs]
     
     total_reward = 0.0

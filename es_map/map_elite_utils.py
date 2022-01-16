@@ -1,5 +1,20 @@
 import numpy as np
 import itertools
+import matplotlib.pyplot as plt
+
+from es_map import nd_sort
+        
+def calculate_behavioural_variance(child_evaluations,config):
+    bcs = child_evaluations["bcs"]
+    bc_mean = np.mean(bcs,axis=0)
+    contributions_to_variance = np.sum(((bcs - bc_mean) ** 2),axis=1)
+    evolvability_of_parent = np.mean(contributions_to_variance) # NOTE this is not really a variance, because BC is a vector
+    return evolvability_of_parent                               # it is the summed variance of each component of BC
+    
+
+def calculate_innovativeness(child_evaluations,novelty_archive,config): # innovation is excpected novelty
+    novelties = novelty_archive.calculate_novelty(child_evaluations["bcs"],k_neerest=config["NOVELTY_CALCULATION_NUM_NEIGHBORS"])
+    return np.mean(novelties) # expected novelty of children
         
 def create_id_generator():
     counter = itertools.count()
@@ -42,30 +57,53 @@ def rank_based_selection(num_parent_candidates,num_children,agressiveness=1.0):
     return selected_indicies
 
 
-def plot_b_map(b_map,metric="eval_fitness",plt_inline_mode=False):
+def plot_b_map(b_map,metric="eval_fitness",config=None,plt_inline_mode=False):
     
     data = []
-    for val in b_map.data.reshape(-1):
-        if val is not None:
-            if val["elite"][metric] is not None:
-                data.append(val["elite"][metric])
+    if config["BMAP_type_and_metrics"]["type"] == "single_map":
+        for val in b_map.data.reshape(-1):
+            if val is not None:
+                if val["elite"][metric] is not None:
+                    data.append(val["elite"][metric])
+                else:
+                    data.append(None)
             else:
                 data.append(None)
-        else:
-            data.append(None)
-    data = np.array(data).reshape(*b_map.data.shape)
-    
-    import matplotlib.pyplot as plt
+        data = np.array(data).reshape(*b_map.data.shape)
+        
+    elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        metric_i = b_map.get_metric_index(metric)
+        for val in b_map.data[metric_i].reshape(-1):
+            if val is not None:
+                if val["elite"][metric] is not None:
+                    data.append(val["elite"][metric])
+                else:
+                    data.append(None)
+            else:
+                data.append(None)
+        data = np.array(data).reshape(*b_map.data[metric_i].shape)
+        
+    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+        for val in b_map.data.reshape(-1):
+            if val is not None:
+                metric_values = [elite[metric] for elite in val["elites"] if elite[metric] is not None]
+                if len(metric_values) > 0:
+                    data.append(max(metric_values))
+                else:
+                    data.append(None)
+            else:
+                data.append(None)
+        data = np.array(data).reshape(*b_map.data.shape)
     
     if len(data.shape) == 4:
-        plot_4d_map(data,metric)
+        return plot_4d_map(data,metric)
     elif len(data.shape) == 2:
         if plt_inline_mode is True:
-            plt.imshow(data)
+            plt.imshow(data.astype(float))
             plt.colorbar()
         else:
             fig,ax = plt.subplots()
-            ax.imshow(data)
+            ax.imshow(data.astype(float))
             return fig,ax
     elif len(data.shape) == 1:
         # 1d grid, make it 2d
@@ -77,11 +115,11 @@ def plot_b_map(b_map,metric="eval_fitness",plt_inline_mode=False):
         img[:size] = data
         img = img.reshape([img_size,img_size])
         if plt_inline_mode is True:
-            plt.imshow(img)
+            plt.imshow(img.astype(float))
             plt.colorbar()
         else:
             fig,ax = plt.subplots()
-            ax.imshow(img)
+            ax.imshow(img.astype(float))
             return fig,ax
         
     else:
@@ -99,12 +137,12 @@ def plot_4d_map(data_4d,plt_inline_mode=False):
 
     if plt_inline_mode is True:
         import matplotlib.pyplot as plt
-        plt.imshow(data_2d)
+        plt.imshow(data_2d.astype(float))
         plt.colorbar()
     else:
         import matplotlib.pyplot as plt
         fig,ax = plt.subplots()
-        ax.imshow(data_2d)
+        ax.imshow(data_2d.astype(float))
         #ax.colorbar()
     
         return fig,ax
@@ -214,9 +252,9 @@ def try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,conf
     else:
         if metric == "innovation": # recalculate innovation
             if b_map.data[map_coords]["elite"]["child_eval"] is not None:
-                b_map.data[map_coords]["elite"][metric] = es_update.calculate_innovativeness(b_map.data[map_coords]["elite"]["child_eval"],b_archive,config)
+                b_map.data[map_coords]["elite"][metric] = calculate_innovativeness(b_map.data[map_coords]["elite"]["child_eval"],b_archive,config)
             else:
-                raise "Error: what is this doing in an innovation map if no innovation is calculated for it??"
+                raise "Error: what is this doing in an innovation map if no innovation is calculated for it??"        
         if b_map.data[map_coords]["elite"][metric] < new_individual[metric]:
             needs_adding = True
         
@@ -238,7 +276,7 @@ def try_insert_individual_in_map(new_individual,b_map,b_archive,config):
         if len(metrics) > 1:
             raise "Error, single map should only have one metric!!"
         
-        map_coords = b_map.get_cell_coords(new_individual["bc"])
+        map_coords = b_map.get_cell_coords(new_individual["eval_bc"])
         return try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,config)
         
     elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
@@ -247,7 +285,7 @@ def try_insert_individual_in_map(new_individual,b_map,b_archive,config):
             raise "Error, why use multi map if you only have one metric!!"
         
         for metric in metrics:
-            map_coords = b_map.get_cell_coords(new_individual["bc"],metric)
+            map_coords = b_map.get_cell_coords(new_individual["eval_bc"],metric)
             return try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,config)
         
     elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
@@ -257,7 +295,7 @@ def try_insert_individual_in_map(new_individual,b_map,b_archive,config):
         if len(metrics) < 2:
             raise "Error, why do nd_sorted_map if you dont specify multiple objectives for it!!"
         
-        map_coords = b_map.get_cell_coords(new_individual["bc"])
+        map_coords = b_map.get_cell_coords(new_individual["eval_bc"])
         if b_map.data[map_coords] is None:
             # emtpy, just add it
             b_map.data[map_coords] = {"elites" : [new_individual]}
@@ -267,16 +305,19 @@ def try_insert_individual_in_map(new_individual,b_map,b_archive,config):
             if "innovation" in metrics: # make sure innovation is up to date
                 for elite in current_elites:
                     if elite["child_eval"] is not None:
-                        updated_innovation = es_update.calculate_innovativeness(elite["child_eval"],b_archive,config)
+                        updated_innovation = calculate_innovativeness(elite["child_eval"],b_archive,config)
                         elite["innovation"] = updated_innovation
             all_contestants = current_elites
             all_contestants.append(new_individual)
+            new_id = len(all_contestants)
                
-            first_front_sorted_indicies = map_elite_utils.get_nd_sorted_first_front(all_contestants,metrics)
+            first_front_sorted_indicies = get_nd_sorted_first_front(all_contestants,metrics)
             # take the first n elements (or as many as there is)
             sorted_contestants = [all_contestants[idx] for idx in first_front_sorted_indicies]
             new_elites = sorted_contestants[:config["ES_ND_SORT_MAX_FRONT_SIZE_TO_KEEP"]]
             b_map.data[map_coords]["elites"] = new_elites
-            if new_individual in new_elites:
+
+            # test if we actually inserted the new individual
+            if new_id in first_front_sorted_indicies[:config["ES_ND_SORT_MAX_FRONT_SIZE_TO_KEEP"]]:
                 return True
             return False
