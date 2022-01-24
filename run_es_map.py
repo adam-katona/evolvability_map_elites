@@ -75,10 +75,10 @@ def run_es_experiment():
     
     ######## DEBUG ##################
     #config_defaults["ALGORITHM_TYPE"] = "PLAIN_ES"
-    config_defaults["BMAP_type_and_metrics"]["metrics"] = ["eval_fitness","evolvability","innovation"]
-    config_defaults["ES_UPDATES_MODES_TO_USE"] = ["fitness","evolvability","innovation"]
-    config_defaults["env_id"] ="QDAntBulletEnv-v0"
-    n_workers = 8
+    #config_defaults["BMAP_type_and_metrics"]["metrics"] = ["eval_fitness","evolvability","innovation"]
+    #config_defaults["ES_UPDATES_MODES_TO_USE"] = ["fitness","evolvability","innovation"]
+    #config_defaults["env_id"] ="QDAntBulletEnv-v0"
+    #n_workers = 8
     
     print("Initializing wandb")
     config = submission_common.setup_wandb(config_defaults,project_name="ES_SINGLE")

@@ -71,7 +71,7 @@ def run_es_map_elites(client,config,wandb_logging=True):
     from es_map import submission_common
     config["map_elites_grid_description"] = submission_common.get_bc_descriptor_for_env(config["env_id"])
     
-    DEBUG = True
+    DEBUG = False
     if DEBUG is True:
         config["ES_NUM_GENERATIONS"] = 15
         config["ES_popsize"] = 12
@@ -149,6 +149,7 @@ def run_es_map_elites(client,config,wandb_logging=True):
                     
                     "evolvability" : None,
                     "innovation" : None,
+                    "entropy" : None,
 
                     "innovation_over_time" : None,  # innovation decreases over time, as we add new individuals to the archive
                     #{  
@@ -268,8 +269,10 @@ def run_es_map_elites(client,config,wandb_logging=True):
             if current_individual["evolvability"] is None:
                 current_evolvability = map_elite_utils.calculate_behavioural_variance(current_individual["child_eval"],config)
                 current_innovation = map_elite_utils.calculate_innovativeness(current_individual["child_eval"],b_archive,config)
+                current_entropy = map_elite_utils.calculate_behavioural_distribution_entropy(current_individual["child_eval"],config)
                 current_individual["evolvability"] = current_evolvability
                 current_individual["innovation"] = current_innovation
+                current_individual["entropy"] = current_entropy
                 
             
             
@@ -286,6 +289,7 @@ def run_es_map_elites(client,config,wandb_logging=True):
             updated_child_eval = distributed_evaluate.es_evaluate_children(client,updated_theta,obs_mean=current_obs_mean,obs_std=current_obs_std,config=config)
             updated_evolvability = map_elite_utils.calculate_behavioural_variance(updated_child_eval,config)
             updated_innovation = map_elite_utils.calculate_innovativeness(updated_child_eval,b_archive,config)
+            updated_entropy = map_elite_utils.calculate_behavioural_distribution_entropy(updated_child_eval,config)
             
             # record the observation stats
             observation_stats["sum"] += updated_child_eval["child_obs_sum"]
@@ -305,6 +309,7 @@ def run_es_map_elites(client,config,wandb_logging=True):
 
                 "evolvability" : updated_evolvability,
                 "innovation" : updated_innovation,
+                "entropy" : updated_entropy,
 
                 "innovation_over_time" : {   # innovation decreases over time, as we add new individuals to the archive
                     generation_number : updated_innovation,
@@ -358,6 +363,7 @@ def run_es_map_elites(client,config,wandb_logging=True):
                 "current_eval_fitness" : new_individual["eval_fitness"],
                 "current_evolvability" : new_individual["evolvability"],
                 "current_innovation" : new_individual["innovation"],
+                "current_entropy" : new_individual["entropy"],
             }
             if wandb_logging is True:
                 wandb.log(step_logs)
@@ -375,9 +381,9 @@ def run_es_map_elites(client,config,wandb_logging=True):
                     "evaluations_so_far" : generation_number*config["ES_popsize"],
                     "b_map_plot" : fig_f,
                 }
-                #if "evolvability" in config["BMAP_type_and_metrics"]["metrics"]: # actually not need metric to record evolvability
-                fig_evo,ax = map_elite_utils.plot_b_map(b_map,metric="evolvability",config=config)
-                n_step_log["b_map_evolvability_plot"] = fig_evo
+                if "evolvability" in config["BMAP_type_and_metrics"]["metrics"]: 
+                    fig_evo,ax = map_elite_utils.plot_b_map(b_map,metric="evolvability",config=config)
+                    n_step_log["b_map_evolvability_plot"] = fig_evo
                 
                 if wandb_logging is True:
                     wandb.log(n_step_log)

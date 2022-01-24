@@ -1,6 +1,7 @@
 import numpy as np
 import itertools
 import matplotlib.pyplot as plt
+import scipy.spatial.distance
 
 from es_map import nd_sort
         
@@ -11,6 +12,18 @@ def calculate_behavioural_variance(child_evaluations,config):
     evolvability_of_parent = np.mean(contributions_to_variance) # NOTE this is not really a variance, because BC is a vector
     return evolvability_of_parent                               # it is the summed variance of each component of BC
     
+    
+def calculate_behavioural_distribution_entropy(child_evaluations,config):
+    def kernel_func(b):
+        k_sigma = 1.0  # kernel standard deviation
+        pairwise_sq_dists = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(b.reshape(-1, 1), "sqeuclidean"))
+        # pylint: disable=invalid-unary-operand-type
+        k = np.exp(-pairwise_sq_dists / k_sigma ** 2)
+        return k
+    
+    bcs = child_evaluations["bcs"]
+    entropy = -np.log(kernel_func(bcs).mean(axis=1)).mean()
+    return entropy
 
 def calculate_innovativeness(child_evaluations,novelty_archive,config): # innovation is excpected novelty
     novelties = novelty_archive.calculate_novelty(child_evaluations["bcs"],k_neerest=config["NOVELTY_CALCULATION_NUM_NEIGHBORS"])
@@ -110,7 +123,7 @@ def plot_b_map(b_map,metric="eval_fitness",config=None,plt_inline_mode=False):
         size = data.shape[0]
         # here you would find the closest divisor to the square root.
         # Or even it does not have to be a divisor, just fill with None-s in the end
-        img_size = np.ceil(np.sqrt(size))
+        img_size = int(np.ceil(np.sqrt(size)))
         img = np.array([None]*(img_size*img_size))
         img[:size] = data
         img = img.reshape([img_size,img_size])

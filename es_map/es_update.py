@@ -95,16 +95,26 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
         
         pass
     
-    elif es_update_type == "quality_evolvability":
+    elif (es_update_type == "quality_evolvability" or 
+          es_update_type == "quality_innovation" or
+          es_update_type == "quality_evolvability_innovation"):
         # we do a nondominating sort on fitness and evolvability, and use the ranks to do the update
         
         fitnesses = np.array(child_evaluations["fitnesses"])
-        bcs = child_evaluations["bcs"]
-        bc_mean = np.mean(bcs,axis=0)
-        contributions_to_variance = np.sum(((bcs - bc_mean) ** 2),axis=1)
-
-        multi_objective_fitnesses = np.concatenate([fitnesses.reshape(-1,1),contributions_to_variance.reshape(-1,1)],axis=1)
-        # multi_objective_fitnesses shape is (pop_size,2)
+        
+        objetives = [fitnesses.reshape(-1,1)]
+        
+        if "evolvability" in es_update_type:
+            bcs = child_evaluations["bcs"]
+            bc_mean = np.mean(bcs,axis=0)
+            contributions_to_variance = np.sum(((bcs - bc_mean) ** 2),axis=1)
+            objetives.append(contributions_to_variance.reshape(-1,1))
+        if  "innovation" in es_update_type:
+            novelties = novelty_archive.calculate_novelty(child_evaluations["bcs"],k_neerest=config["NOVELTY_CALCULATION_NUM_NEIGHBORS"])
+            objetives.append(novelties.reshape(-1,1))
+        
+        multi_objective_fitnesses = np.concatenate(objetives,axis=1)
+        # multi_objective_fitnesses shape is (pop_size,2) or (pop_size,3) 
 
         fronts = nd_sort.calculate_pareto_fronts(multi_objective_fitnesses)
         nondomination_rank_dict = nd_sort.fronts_to_nondomination_rank(fronts)
@@ -112,8 +122,6 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
         sorted_indicies = nd_sort.nondominated_sort(nondomination_rank_dict,crowding)
         # nondominated sort sorts, so best is first. This is opposite to what we did in the other cases, reverse the indicies.
         sorted_indicies = sorted_indicies[::-1]
-        
-        
     else:
         raise "unknown es_update_type"
     

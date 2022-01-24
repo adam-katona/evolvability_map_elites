@@ -156,6 +156,8 @@ def run_plain_es(client,config,wandb_logging=True):
                 
         current_evolvability = map_elite_utils.calculate_behavioural_variance(child_evals,config)
         current_innovation = map_elite_utils.calculate_innovativeness(child_evals,b_archive,config)
+        current_entropy = map_elite_utils.calculate_behavioural_distribution_entropy(child_evals,config)
+        
         
         eval_results = distributed_evaluate.evaluate_individual_repeated(theta=theta,
                                                                 obs_mean=current_obs_mean,obs_std=current_obs_std,use_action_noise=False,record_obs=False,
@@ -194,6 +196,7 @@ def run_plain_es(client,config,wandb_logging=True):
             "current_eval_fitness" : eval_results["fitness"],
             "current_evolvability" : current_evolvability,
             "current_innovation" : current_innovation,
+            "current_entropy" : current_entropy,
         }
         if wandb_logging is True:
             wandb.log(step_logs)

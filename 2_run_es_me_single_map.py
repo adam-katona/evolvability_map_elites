@@ -20,6 +20,9 @@ if __name__ == '__main__':
             "ALGORITHM_TYPE" : {
                 "values" : ["MAP_ES"]
             },
+            "ES_OPTIMIZER_TYPE" : {
+                "values" : ["ADAM"]  
+            },    
             
             "BMAP_type_and_metrics" : {
                 "values" : [
@@ -55,7 +58,8 @@ if __name__ == '__main__':
                     ["fitness","innovation"],
             #        #["evolvability","innovation"],
                     ["fitness","evolvability","innovation"],
-                    ["quality_evolvability"]
+            #        ["fitness","evolvability","innovation","quality_evolvability","quality_innovation","quality_evolvability_innovation"], 
+            
                 ],
             },
             "env_args" : {
@@ -80,7 +84,7 @@ if __name__ == '__main__':
     
     
     
-    nd_sorted_sweep_config = {
+    combined_sweep_config = {
        "name" : "es_single_map_sweep",
         "program" : "/home/userfs/a/ak1774/workspace/evolvability_map_elites/evolvability_map_elites/run_es_map.py",
         "metric": {"name": "best_fitness_so_far", "goal": "maximize"},
@@ -90,8 +94,8 @@ if __name__ == '__main__':
                 "values" : ["MAP_ES"]
             },
             "ES_OPTIMIZER_TYPE" : {
-                "values" : ["SGD"]  # with map elites let us use sgd, because we not yet implemented optimizer state saving
-            },                      # NOTE the original es me paper reset optimizer whenever new paretn is selected, I can do the same
+                "values" : ["ADAM"]  
+            },                      
             
             "BMAP_type_and_metrics" : {
                 "values" : [
@@ -103,20 +107,29 @@ if __name__ == '__main__':
                     #   "type" : "multi_map",
                     #    "metrics" : [],
                     #},
-                    {
-                       "type" : "nd_sorted_map",
-                        "metrics" : ["eval_fitness","innovation"],
-                    },
-                    {
-                       "type" : "nd_sorted_map",
-                        "metrics" : ["eval_fitness","evolvability"],
-                    },
+                    #{
+                    #   "type" : "nd_sorted_map",
+                    #    "metrics" : ["eval_fitness","innovation"],
+                    #},
+                    #{
+                    #   "type" : "nd_sorted_map",
+                    #    "metrics" : ["eval_fitness","evolvability"],
+                    #},
                     {
                        "type" : "nd_sorted_map",
                         "metrics" : ["eval_fitness","evolvability","innovation"],
                     },
+                    {
+                       "type" : "multi_map",
+                        "metrics" : ["eval_fitness","evolvability","innovation"],
+                    },
                 ]
             },
+            
+        #"quality_evolvability" or 
+        #"quality_innovation" or
+        #"quality_evolvability_innovation"
+            
             
             "ES_UPDATES_MODES_TO_USE" : {
                 "values" :  [ 
@@ -127,7 +140,8 @@ if __name__ == '__main__':
             #        ["fitness","innovation"],
             #        #["evolvability","innovation"],
                      ["fitness","evolvability","innovation"],
-                     ["quality_evolvability"], 
+                     #["quality_evolvability","quality_innovation","quality_evolvability_innovation"], 
+                     ["fitness","evolvability","innovation","quality_evolvability","quality_innovation","quality_evolvability_innovation"], 
                 ],
             },
             "env_args" : {
@@ -160,6 +174,9 @@ if __name__ == '__main__':
             "ALGORITHM_TYPE" : {
                 "values" : ["MAP_ES"]
             },
+            "ES_OPTIMIZER_TYPE" : {
+                "values" : ["ADAM"]  
+            },    
             
             "BMAP_type_and_metrics" : {
                 "values" : [
@@ -167,14 +184,14 @@ if __name__ == '__main__':
                     #   "type" : "single_map",
                     #    "metrics" : ["eval_fitness"],
                     #},
-                    {
-                       "type" : "multi_map",
-                        "metrics" : ["eval_fitness","innovation"],
-                    },
-                    {
-                       "type" : "multi_map",
-                        "metrics" : ["eval_fitness","evolvability"],
-                    },
+                    #{
+                    #   "type" : "multi_map",
+                    #    "metrics" : ["eval_fitness","innovation"],
+                    #},
+                    #{
+                    #   "type" : "multi_map",
+                    #    "metrics" : ["eval_fitness","evolvability"],
+                    #},
                     {
                        "type" : "multi_map",
                         "metrics" : ["eval_fitness","evolvability","innovation"],
@@ -184,14 +201,16 @@ if __name__ == '__main__':
           
             "ES_UPDATES_MODES_TO_USE" : {
                 "values" :  [ 
-                    ["fitness"],
+            #        ["fitness"],
             #        ["evolvability"],
             #        ["innovation"],
-                    ["fitness","evolvability"],
-                    ["fitness","innovation"],
+            #        ["fitness","evolvability"],
+            #        ["fitness","innovation"],
             #        #["evolvability","innovation"],
                     ["fitness","evolvability","innovation"],
-                    ["quality_evolvability"], 
+            #        ["quality_evolvability"],
+                    ["fitness","evolvability","innovation","quality_evolvability","quality_innovation","quality_evolvability_innovation"], 
+            
                 ],
             },
             "env_args" : {
@@ -219,7 +238,7 @@ if __name__ == '__main__':
     #sys.quit()
 
     print("Starting SWEEP!!!")
-    sweep_id = wandb.sweep(sweep_configuration)
+    sweep_id = wandb.sweep(single_map_sweep_config)
     print("Sweep started!   Starting agent now...")
     #wandb.agent(sweep_id, function=run_es_experiment)
     #print("Agent Done!!!")
