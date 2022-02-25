@@ -65,6 +65,10 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
     # calculate indicies based on the type of ES update
     pop_size = len(child_evaluations["fitnesses"])  # can be slightly different from config["ES_popsize"]
     
+    # if using ranked_weighting, we sort the metric, and asign weights between -0.5 and 0.5
+    # else, we use the metric directly (perturbation_weights)
+    using_ranked_weighting = True
+    
     if es_update_type == "fitness":
         sorted_indicies = np.argsort(child_evaluations["fitnesses"]) 
         pass
@@ -94,6 +98,42 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
         innovation_of_parent = np.mean(novelties)
         
         pass
+    
+    elif es_update_type == "max_ent":
+        
+        bcs = child_evaluations["bcs"]
+        
+        # contribution to entropy
+        import scipy.spatial.distance
+        k_sigma = 0.25  # kernel standard deviation
+        pairwise_sq_dists = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(bcs, "sqeuclidean"))
+        k = np.exp(-pairwise_sq_dists / k_sigma ** 2)
+
+        p = k.mean(axis=1)
+        entropy_term = -np.log(p)
+        other_term = - (k / k.mean(axis=0)).mean(axis=1)
+     
+        perturbation_weights = entropy_term + other_term
+        using_ranked_weighting = False
+     
+    
+    elif es_update_type == "ent_novelty":  # archive only
+        # instead of calculating novelty with neerest neighbors, 
+        # we calculate novelty by how much the individual increases the entropy of the archive
+        
+        # while the population have some effect on the probabiliy estimation of the archive, 
+        # but if we assume archive size >> than pop size, we can ignore that effect
+        # So we only care about 
+        
+        #archive_bcs = novelty_archive.
+        
+        pass
+    elif es_update_type == "ent_novelty_with_population":  # archive + population
+        
+        
+        pass 
+        
+        
     
     elif (es_update_type == "quality_evolvability" or 
           es_update_type == "quality_innovation" or
@@ -126,12 +166,15 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
         raise "unknown es_update_type"
     
         
-    # calculate ranks
-    all_ranks = np.linspace(-0.5,0.5,len(sorted_indicies)) 
-    perturbation_ranks = np.zeros(len(sorted_indicies))
-    perturbation_ranks[sorted_indicies] = all_ranks
-    perturbation_ranks = torch.from_numpy(perturbation_ranks).float()
-    
+    if using_ranked_weighting is True:
+        # calculate ranks
+        all_ranks = np.linspace(-0.5,0.5,len(sorted_indicies)) 
+        perturbation_ranks = np.zeros(len(sorted_indicies))
+        perturbation_ranks[sorted_indicies] = all_ranks
+        perturbation_ranks = torch.from_numpy(perturbation_ranks).float()
+    else:
+        perturbation_ranks = torch.from_numpy(perturbation_weights).float()
+        
     # reconstruct perturbations
     from es_map import random_table
     noise_table = random_table.noise_table

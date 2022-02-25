@@ -24,6 +24,10 @@ if __name__ == '__main__':
                 "values" : ["ADAM"]  
             },    
             
+            "RUN_ID" : {
+                "values" : [0,]
+            },
+            
             "BMAP_type_and_metrics" : {
                 "values" : [
                     {
@@ -51,13 +55,14 @@ if __name__ == '__main__':
             
             "ES_UPDATES_MODES_TO_USE" : {
                 "values" :  [ 
-                    ["fitness"],
+                    ["fitness","evolvability"],
+                    ["fitness","max_ent"],
             #        ["evolvability"],
             #        ["innovation"],
-                    ["fitness","evolvability"],
-                    ["fitness","innovation"],
+            #        ["fitness","evolvability"],
+            #        ["fitness","innovation"],
             #        #["evolvability","innovation"],
-                    ["fitness","evolvability","innovation"],
+            #        ["fitness","evolvability","innovation"],
             #        ["fitness","evolvability","innovation","quality_evolvability","quality_innovation","quality_evolvability_innovation"], 
             
                 ],
@@ -73,9 +78,9 @@ if __name__ == '__main__':
                 "values" : [
                     #"DamageAnt-v2",
                     "QDAntBulletEnv-v0",
-                    "QDWalker2DBulletEnv-v0",
+                    #"QDWalker2DBulletEnv-v0",
                     "QDHalfCheetahBulletEnv-v0",
-                    "QDHopperBulletEnv-v0",
+                    #"QDHopperBulletEnv-v0",
                 ]
             }
         },
