@@ -1,27 +1,44 @@
 import os
-os.environ["MKL_NUM_THREADS"] = "1" 
-os.environ["NUMEXPR_NUM_THREADS"] = "1" 
-os.environ["OMP_NUM_THREADS"] = "1" 
 import numpy as np
 
 import wandb
 from es_map import submission_common
+from es_map import jax_es_map_train
 
 def run_es_experiment():
     
     config_defaults = {
-        "env_id" : "QDAntBulletEnv-v0", # "DamageAnt-v2",
-        "policy_args" : {
-            "init" : "normc",
-            "layers" :[128, 128],#[256, 256],
-        "activation" : 'tanh',
-        "action_noise" : 0.01,
-        },
-        "env_args" : {
-            "use_norm_obs" : True,
-        },
+        "env_name" : "ant", #  ant, walker, hopper, halfcheetah, humanoid, ant_omni, humanoid_omni
+        "episode_max_length" : 1000,
+        "env_deterministic" : True, 
+
+        "ES_NUM_GENERATIONS" : 500,  # was 1000
+        "ES_popsize" : 1000,
+        "ES_sigma" : 0.02,
+        "ES_OPTIMIZER_TYPE" : "ADAM",
+        "ES_lr" : 0.01,
+        "ES_L2_COEFF" : 0.005,  
         
-        "ALGORITHM_TYPE" : "MAP_ES",   # "PLAIN_ES", "MAP_ES", "MAP_GA"
+        "ES_CENTRAL_NUM_EVALUATIONS" : 50,# How many times central individual evaluated
+        "EVALUATION_BATCH_SIZE" : 50, 
+        "ES_STEPS_UNTIL_NEW_PARENT_SELECTION" : 5,
+        
+        
+        "ES_UPDATES_MODES_TO_USE" : ["fitness"], # "fitness","evo_var","evo_ent","innovation",...
+        
+        "NOVELTY_CALCULATION_NUM_NEIGHBORS" : 10,
+        "ENTROPY_CALCULATION_KERNEL_BANDWIDTH" : 0.25, # TODO maybe this should be different for final pos and foot contacts...
+        
+        "CHECKPOINT_FREQUENCY" : 100,
+        
+        
+        
+        "BMAP_type_and_metrics" : {
+            "type" : "single_map",
+            "metrics" : ["eval_fitness"],
+        }
+    
+    config_defaults = {
         
         "ES_NUM_INITIAL_RANDOM_INDIVIDUALS_TO_POPULATE_MAP" : 20,
         
@@ -35,16 +52,6 @@ def run_es_experiment():
         
         "ES_CENTRAL_NUM_EVALUATIONS" : 30,
         "ES_STEPS_UNTIL_NEW_PARENT_SELECTION" : 5,
-        
-        "GA_MAP_ELITES_NUM_GENERATIONS" : 1000,
-        
-        "GA_CHILDREN_PER_GENERATION" : 200,
-        "GA_NUM_EVALUATIONS" : 10,
-        
-        "GA_MULTI_PARENT_MODE" : True,
-        "GA_PARENT_SELECTION_MODE" : "rank_proportional",  # "uniform", "rank_proportional"
-        "GA_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS" : 1.0,  # 0.0 uniform, 1.0 normal , higher more agressive
-        "GA_MUTATION_POWER" : 0.02,
         
         "map_elites_grid_description" : {
             "bc_limits" : [[0,1],[0,1],[0,1],[0,1]],

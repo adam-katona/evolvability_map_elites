@@ -36,10 +36,16 @@ def _get_cell_coords(bc,config):
 # - nd_sorted map
 
 def create_b_map_grid(config):
-    if config["BMAP_type_and_metrics"]["type"] == "multi_map":
-        return Grid_behaviour_multi_map(config)
+    if config["BMAP_type_and_metrics"]["type"] == "single_map":
+        b_map = Grid_behaviour_map(config)
+    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+        b_map = Grid_behaviour_map(config)
+    elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        b_map = Grid_behaviour_multi_map(config)
     else:
-        return Grid_behaviour_map(config)
+        raise "Unknown BMAP_type"
+    return b_map
+
 
 class Grid_behaviour_map:
     # This is a normal b_map with a single channel. 

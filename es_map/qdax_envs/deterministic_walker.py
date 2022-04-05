@@ -17,9 +17,10 @@ class DetWalker2d(walker2d.Walker2d):
 
   def reset(self, rng: jp.ndarray) -> brax_env.State:
     """Resets the environment to an initial state."""
+    # NOTE actually not deterministic any more LOL. For deterministic behavior call env.seed(0) every time you before call env.reset()
     rng, rng1, rng2 = jp.random_split(rng, 3)
-    qpos = self.sys.default_angle() #+ jp.random_uniform(rng1, (self.sys.num_joint_dof,), -.005, .005)
-    qvel = jp.zeros((self.sys.num_joint_dof,)) #jp.random_uniform(rng2, (self.sys.num_joint_dof,), -.005, .005)
+    qpos = self.sys.default_angle() + jp.random_uniform(rng1, (self.sys.num_joint_dof,), -.005, .005)
+    qvel = jp.random_uniform(rng2, (self.sys.num_joint_dof,), -.005, .005)
     qp = self.sys.default_qp(joint_angle=qpos, joint_velocity=qvel)
     obs = self._get_obs(qp)
     reward, done, zero = jp.zeros(3)

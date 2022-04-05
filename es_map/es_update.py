@@ -105,7 +105,7 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
         
         # contribution to entropy
         import scipy.spatial.distance
-        k_sigma = 0.25  # kernel standard deviation
+        k_sigma = config["ENTROPY_CALCULATION_KERNEL_BANDWIDTH"]  # kernel standard deviation
         pairwise_sq_dists = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(bcs, "sqeuclidean"))
         k = np.exp(-pairwise_sq_dists / k_sigma ** 2)
 
@@ -196,7 +196,7 @@ def es_update(theta,child_evaluations,config,es_update_type="fitness",novelty_ar
         optimizer.load_state_dict(optimizer_state)
     theta.grad = -grad # we are maximizing, but torch optimizer steps in the opposite direction of the gradient, multiply by -1 so we can maximize.
     # also add term for l2 regularization
-    theta.grad = theta.grad 
+    #theta.grad = theta.grad 
     optimizer.step()
     
     updated_theta = theta.detach().numpy()

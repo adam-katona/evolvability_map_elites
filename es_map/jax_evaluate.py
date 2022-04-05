@@ -9,18 +9,82 @@ from brax.envs import env
 import jax.numpy as jnp
 import jax
 
-from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
+from brax.training import distribution
+from brax.training import networks
+
+
 
 from es_map import map_elite_utils
 
 
-def create_ant(env_name,population_size,evaluation_batch_size):
-    if env_name is "ant":
-        env = ant.QDUniAnt()
+def brax_get_bc_descriptor_for_env(env_name):
+    if env_name == "ant":
+        return {
+            "bc_limits" : [[0,1],[0,1],[0,1],[0,1]],
+            "grid_dims" : [6,6,6,6],
+        }
+    elif env_name == "walker" or env_name == "halfcheetah" or env_name == "humanoid":
+        return {
+            "bc_limits" : [[0,1],[0,1]],
+            "grid_dims" : [32,32],
+        }
+    elif env_name == "hopper":
+        return {
+            "bc_limits" : [[0,1]],
+            "grid_dims" : [100],
+        }
+    elif env_name == "ant_omni":
+        return {
+            "bc_limits" : [[-50, 50], [-50, 50]],
+            "grid_dims" : [32,32],
+        }
+    elif env_name == "humanoid_omni":
+        return {
+            "bc_limits" : [[-50, 50], [-50, 50]],
+            "grid_dims" : [32,32],
+        }
     else:
         raise "unknown env name"
+
+def create_env(env_name,population_size,evaluation_batch_size,episode_max_length):
+     
+    # envs to consider:
+    # 3d envs: ant, humanoid
+    # 2d envs: walker, halfcheetah, hopper
     
-    env = wrappers.EpisodeWrapper(env, episode_length=1000, action_repeat=1)
+    # There are several variants of the envs
+    # We can have fitness: movement forward (+ control cost), movement distance, controll cost
+    # We can have bd: foot contacts, final pos
+    
+    # The combinations that we want to do are:
+    # - movement forward, foot contacts   
+    # - controll cost, final pos
+      
+    if env_name == "ant":
+        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
+        env = ant.QDUniAnt()
+    elif env_name == "walker":
+        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
+        env = walker.QDUniWalker()
+    elif env_name == "hopper":
+        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
+        env = hopper.QDUniHopper()
+    elif env_name == "halfcheetah":
+        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
+        env = halfcheetah.QDUniHalfcheetah()
+    elif env_name == "humanoid":
+        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
+        env = humanoid.QDUniHumanoid()
+    elif env_name == "ant_omni":
+        from es_map.qdax_envs.omnidirectional_envs import ant
+        env = ant.QDOmniAnt()
+    elif env_name == "humanoid_omni":
+        from es_map.qdax_envs.omnidirectional_envs import humanoid
+        env = humanoid.QDOmniHumanoid()
+    else:
+        raise "unknown env name"
+   
+    env = wrappers.EpisodeWrapper(env, episode_length=episode_max_length, action_repeat=1)
     env = wrappers.VectorWrapper(env, batch_size=population_size+evaluation_batch_size) # for each iteration, we evaluate the children and the parent performance in parallel
     env = wrappers.AutoResetWrapper(env) # not sure if this is nessasary, we only look at the first episode
     env = wrappers.VectorGymWrapper(env) 
@@ -28,8 +92,8 @@ def create_ant(env_name,population_size,evaluation_batch_size):
 
 
 def create_MLP_model(observation_size, action_size):
-    parametric_action_distribution = brax.training.distribution.NormalTanhDistribution(event_size=action_size)
-    return brax.training.networks.make_model(
+    parametric_action_distribution = distribution.NormalTanhDistribution(event_size=action_size)
+    return networks.make_model(
       [64, 64, parametric_action_distribution.param_size],
       observation_size,
     )
@@ -93,6 +157,47 @@ def vec_to_params_tree(vec,shapes,indicies):
 
 
 
+def get_calculate_novelty_fn(k):
+    def calculate_novelty(bd,archive):
+        # For no
+        distances = jnp.sqrt(jnp.sum((archive - bd)**2,axis=1))
+        actual_k = min(k,archive.shape[0])
+        nearest_neighbors,nearest_indicies = jax.lax.top_k(-distances, actual_k) # take negative to calculate neerest instead of furthest
+        novelty = -jnp.mean(nearest_neighbors)   # take negative again, to get the mean distance
+        return novelty
+    
+    return calculate_novelty
+
+################################
+## NOVELTY CALCULATION USAGE: ##
+################################
+# calculate_novelty_fn = get_calculate_novelty_fn(k=10)
+# batch_calculate_novelty_fn = jax.jit(jax.vmap(calculate_novelty_fn,in_axes=[0, None]))
+# novelties = batch_calculate_novelty_fn(bds,archive)
+
+def calculate_evo_var(bds):
+    bd_mean = jnp.mean(bds,axis=0)
+    contributions_to_variance = jnp.sum(((bds - bd_mean) ** 2),axis=1)
+    evolvability_of_parent = jnp.mean(contributions_to_variance).item()
+    return evolvability_of_parent
+
+def calculate_evo_ent(bds,config):
+    bds_cpu = np.array(bds)
+    import scipy.spatial.distance
+    k_sigma = config["ENTROPY_CALCULATION_KERNEL_BANDWIDTH"]  # kernel standard deviation
+    pairwise_sq_dists = scipy.spatial.distance.squareform(scipy.spatial.distance.pdist(bds_cpu, "sqeuclidean"))
+    k = np.exp(-pairwise_sq_dists / k_sigma ** 2)
+    p = k.mean(axis=1)
+    entropy = -np.log(p).mean()
+    return entropy
+    
+
+
+
+
+
+
+
 def rollout_episodes(env,params,obs_stats,config,
                      batched_model_apply_fn):
     # env - gym wrapped batched brax env
@@ -104,12 +209,22 @@ def rollout_episodes(env,params,obs_stats,config,
     # bds - episode behavior descriptors
     # new_obs_stats - updated obs_stats
     
+    
+    
+    
+    if config["env_deterministic"] is True:
+        # if deterministic, we set the same key for every reset
+        # the key is only used to add some random perturbation to the starting position, so it is only relevant to do before we call reset
+        env.seed(666)
     obs = env.reset()
+    
     
     cumulative_reward = jnp.zeros(obs.shape[0])
     active_episode = jnp.ones_like(cumulative_reward)
     bd_dim = env._state.info["bd"].shape[1]
     bds = jnp.zeros([obs.shape[0],bd_dim])
+
+    final_pos = jnp.zeros([obs.shape[0],2]) # only for plotting purpuses
 
     # prepare obs stats
     mean,var = map_elite_utils.calculate_obs_stats(obs_stats)
@@ -122,8 +237,7 @@ def rollout_episodes(env,params,obs_stats,config,
     obs_count = jnp.array([obs_stats["count"]])
     
     
-    # max_steps = config[""] # TODO
-    max_steps = 1000
+    max_steps = config["episode_max_length"]
     
     for step_i in range(max_steps):
     
@@ -134,14 +248,25 @@ def rollout_episodes(env,params,obs_stats,config,
     
         obs,reward,done,info = env.step(action)
         
+        if step_i == (max_steps-1): # if we reached the max time limit, set done to 1 
+            done = jnp.ones_like(done) 
         last_step_of_first_episode = active_episode * done # will only ever be 1 when we are at last step of first episode
         active_episode = active_episode * (1 - done) # once the first episode is done, active_episode will become and stay 0
         
         cumulative_reward += reward * active_episode
     
+        
+
         # bd is sometimes nan and inf (we multiply by 0 in those cases, but still infects with nan...)
         info_bd = jnp.nan_to_num(info["bd"],nan=0.0, posinf=0.0, neginf=0.0)
         bds = bds + last_step_of_first_episode.reshape(-1,1) * info_bd
+        
+        # even when bd is not final pos, it is good to have the final position for plotting purpuses
+        # we want to take the xy pos of the body (coord system is z up, right handed)
+        # the pos is in the shape of [batch_dim,num_bodies,3]
+        # we want to take body 0, because that is the torso i think for all robots
+        current_pos = env._state.qp.pos[:,0,0:2]  
+        final_pos = final_pos + last_step_of_first_episode.reshape(-1,1) * current_pos
 
         # record observation stats, only count active episodes (zero out others)
         active_obs = active_episode.reshape(-1,1) * obs
@@ -155,4 +280,7 @@ def rollout_episodes(env,params,obs_stats,config,
         "sumsq" : np.array(obs_squared_sums),
         "count" : obs_count[0],
     }
-    return cumulative_reward,bds,new_obs_stats
+    
+    return cumulative_reward,bds,new_obs_stats,final_pos
+
+

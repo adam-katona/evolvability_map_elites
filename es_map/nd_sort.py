@@ -2,6 +2,9 @@
 import numpy as np
 import functools
 
+import jax.numpy as jnp
+from numba import jit
+
 def nd_sort_get_first_front(fitnesses):
 
     fronts = calculate_pareto_fronts(fitnesses)
@@ -35,6 +38,7 @@ def calculate_domination_matrix(fitnesses):
     num_objectives = fitnesses.shape[1]
     
     # numpy meshgrid does not work if original array is 2d, so we have to build the mesh grid manually
+    # Actually i figured out how to do it with it, but is is as slow as doing it manually... (but if you have a gpu, use jax version)
     fitness_grid_x = np.zeros([pop_size,pop_size,num_objectives])
     fitness_grid_y = np.zeros([pop_size,pop_size,num_objectives])
     
@@ -47,6 +51,60 @@ def calculate_domination_matrix(fitnesses):
     
     return np.logical_and(np.all(larger_or_equal,axis=2),np.any(larger,axis=2))
 
+
+def jax_calculate_domination_matrix(fitnesses):
+
+    pop_size = fitnesses.shape[0]
+    num_objectives = fitnesses.shape[1]
+    coord_grid_x,coord_grid_y = jnp.meshgrid(jnp.arange(pop_size),jnp.arange(pop_size),indexing="ij")
+    
+    fitness_grid_x = fitnesses[coord_grid_x]
+    fitness_grid_y = fitnesses[coord_grid_y]
+    
+    larger_or_equal = fitness_grid_x >= fitness_grid_y
+    larger = fitness_grid_x > fitness_grid_y
+    
+    return jnp.logical_and(jnp.all(larger_or_equal,axis=2),jnp.any(larger,axis=2))
+
+
+@jit(nopython=True)
+def numba_calculate_pareto_fronts(domination_matrix):
+    
+    # Calculate dominated set for each individual
+    domination_sets = []
+    domination_counts = []
+    
+    pop_size = domination_matrix.shape[0]
+    
+    for i in range(pop_size):
+        current_dimination_set = set()
+        domination_counts.append(0)
+        for j in range(pop_size):
+            if domination_matrix[i,j]:
+                current_dimination_set.add(j)
+            elif domination_matrix[j,i]:
+                domination_counts[-1] += 1
+                
+        domination_sets.append(current_dimination_set)
+
+    domination_counts = np.array(domination_counts)
+    fronts = []
+    while True:
+        current_front = np.where(domination_counts==0)[0]
+        if len(current_front) == 0:
+            #print("Done")
+            break
+        #print("Front: ",current_front)
+        fronts.append(current_front)
+
+        for individual in current_front:
+            domination_counts[individual] = -1 # this individual is already accounted for, make it -1 so  ==0 will not find it anymore
+            dominated_by_current_set = domination_sets[individual]
+            for dominated_by_current in dominated_by_current_set:
+                domination_counts[dominated_by_current] -= 1
+            
+    return fronts
+
 def calculate_pareto_fronts(fitnesses):
     
     # Calculate dominated set for each individual
@@ -54,6 +112,7 @@ def calculate_pareto_fronts(fitnesses):
     domination_counts = []
     
     domination_matrix = calculate_domination_matrix(fitnesses)
+        
     pop_size = fitnesses.shape[0]
     
     for i in range(pop_size):
