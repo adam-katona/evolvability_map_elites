@@ -56,7 +56,8 @@ def train(config,wandb_logging=True):
         json.dump(config, file,indent=4)
         
     # setup env and model
-    env = jax_evaluate.create_env(env_name,population_size,config["ES_CENTRAL_NUM_EVALUATIONS"],config["episode_max_length"])
+    env = jax_evaluate.create_env(config["env_name"],config["env_mode"],config["ES_popsize"],
+                                  config["ES_CENTRAL_NUM_EVALUATIONS"],config["episode_max_length"])
     model = jax_evaluate.create_MLP_model(env.observation_space.shape[1],env.action_space.shape[1])
 
     # setup batched functions
@@ -133,7 +134,7 @@ def train(config,wandb_logging=True):
 
 
 
-
+            # NOTE, rewrite loop with new rollout function
 
 
 

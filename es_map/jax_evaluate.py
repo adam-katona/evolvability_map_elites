@@ -13,40 +13,10 @@ from brax.training import distribution
 from brax.training import networks
 
 
-
+from es_map.my_brax_envs import brax_envs
 from es_map import map_elite_utils
 
-
-def brax_get_bc_descriptor_for_env(env_name):
-    if env_name == "ant":
-        return {
-            "bc_limits" : [[0,1],[0,1],[0,1],[0,1]],
-            "grid_dims" : [6,6,6,6],
-        }
-    elif env_name == "walker" or env_name == "halfcheetah" or env_name == "humanoid":
-        return {
-            "bc_limits" : [[0,1],[0,1]],
-            "grid_dims" : [32,32],
-        }
-    elif env_name == "hopper":
-        return {
-            "bc_limits" : [[0,1]],
-            "grid_dims" : [100],
-        }
-    elif env_name == "ant_omni":
-        return {
-            "bc_limits" : [[-50, 50], [-50, 50]],
-            "grid_dims" : [32,32],
-        }
-    elif env_name == "humanoid_omni":
-        return {
-            "bc_limits" : [[-50, 50], [-50, 50]],
-            "grid_dims" : [32,32],
-        }
-    else:
-        raise "unknown env name"
-
-def create_env(env_name,population_size,evaluation_batch_size,episode_max_length):
+def create_env(env_name,env_mode,population_size,evaluation_batch_size,episode_max_length):
      
     # envs to consider:
     # 3d envs: ant, humanoid
@@ -59,30 +29,8 @@ def create_env(env_name,population_size,evaluation_batch_size,episode_max_length
     # The combinations that we want to do are:
     # - movement forward, foot contacts   
     # - controll cost, final pos
-      
-    if env_name == "ant":
-        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
-        env = ant.QDUniAnt()
-    elif env_name == "walker":
-        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
-        env = walker.QDUniWalker()
-    elif env_name == "hopper":
-        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
-        env = hopper.QDUniHopper()
-    elif env_name == "halfcheetah":
-        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
-        env = halfcheetah.QDUniHalfcheetah()
-    elif env_name == "humanoid":
-        from es_map.qdax_envs.unidirectional_envs import ant, walker, hopper, halfcheetah, humanoid
-        env = humanoid.QDUniHumanoid()
-    elif env_name == "ant_omni":
-        from es_map.qdax_envs.omnidirectional_envs import ant
-        env = ant.QDOmniAnt()
-    elif env_name == "humanoid_omni":
-        from es_map.qdax_envs.omnidirectional_envs import humanoid
-        env = humanoid.QDOmniHumanoid()
-    else:
-        raise "unknown env name"
+    
+    env = brax_envs.create_base_env(env_name,env_mode)
    
     env = wrappers.EpisodeWrapper(env, episode_length=episode_max_length, action_repeat=1)
     env = wrappers.VectorWrapper(env, batch_size=population_size+evaluation_batch_size) # for each iteration, we evaluate the children and the parent performance in parallel
@@ -195,36 +143,50 @@ def calculate_evo_ent(bds,config):
 
 
 
-
-
-
-def rollout_episodes(env,params,obs_stats,config,
-                     batched_model_apply_fn):
+def rollout_flexible_episodes(env,params,obs_stats,config,
+                              batched_model_apply_fn):
     # env - gym wrapped batched brax env
     # params - batched parameter tree
     # obs_stats - obervation statistics for mean and var calculation for normalization
     #
     # Return
-    # cumulative_reward - episode rewards
-    # bds - episode behavior descriptors
-    # new_obs_stats - updated obs_stats
-    
-    
-    
-    
+ 
     if config["env_deterministic"] is True:
         # if deterministic, we set the same key for every reset
         # the key is only used to add some random perturbation to the starting position, so it is only relevant to do before we call reset
         env.seed(666)
     obs = env.reset()
-    
-    
-    cumulative_reward = jnp.zeros(obs.shape[0])
-    active_episode = jnp.ones_like(cumulative_reward)
-    bd_dim = env._state.info["bd"].shape[1]
-    bds = jnp.zeros([obs.shape[0],bd_dim])
 
-    final_pos = jnp.zeros([obs.shape[0],2]) # only for plotting purpuses
+    IS_DIRECTIONAL_MODE = ("DIRECTIONAL" in config["env_mode"])
+
+    control_cost_fitness = jnp.zeros(env._state.info["fitness_control_cost_and_survive"])
+    forward_fitness = jnp.zeros(env._state.info["fitness_forward"])
+    distance_walked = jnp.zeros(env._state.info["fitness_distance_walked"])
+    if IS_DIRECTIONAL_MODE is True:
+        directional_fitness = jnp.zeros(env._state.info["fitness_directional_distance"])
+
+    final_pos = jnp.zeros_like(env._state.info["bd_final_pos"])
+    foot_contacts = jnp.zeros_like(env._state.info["bd_foot_contacts"])
+
+    # we have 2 kinds of values, the cummulatives, which needs to be summed until the end of the first episode,
+    #                            and the ones which have to be read only once at the end of the episode
+    # Cummulative values:
+    #  - control_cost_fitness
+    #  - forward_fitness
+    # Only read at the end values
+    #  - distance_walked
+    #  - directional_fitness
+    #  - final_pos
+    #  - foot_contacts
+    
+    # Also, the position is zerod the last step of the episode, 
+    # so the values connected to poition must be read out before the last step
+    # These are 
+    #  - distance_walked
+    #  - directional_fitness
+    #  - final_pos
+
+    active_episode = jnp.ones_like(control_cost_fitness)
 
     # prepare obs stats
     mean,var = map_elite_utils.calculate_obs_stats(obs_stats)
@@ -236,7 +198,6 @@ def rollout_episodes(env,params,obs_stats,config,
     obs_squared_sums = jnp.array(obs_stats["sumsq"])
     obs_count = jnp.array([obs_stats["count"]])
     
-    
     max_steps = config["episode_max_length"]
     
     for step_i in range(max_steps):
@@ -245,35 +206,43 @@ def rollout_episodes(env,params,obs_stats,config,
         
         model_out = batched_model_apply_fn(params,normalized_obs)
         action = get_deterministic_actions(model_out)
-    
+        
+        before_step_pos = env._state.info["bd_final_pos"]
+        before_step_distance_walked = env._state.info["fitness_distance_walked"]
+        if IS_DIRECTIONAL_MODE is True:
+            before_step_directional_fitness = env._state.info["fitness_directional_distance"]
+        
+        
         obs,reward,done,info = env.step(action)
         
         if step_i == (max_steps-1): # if we reached the max time limit, set done to 1 
             done = jnp.ones_like(done) 
         last_step_of_first_episode = active_episode * done # will only ever be 1 when we are at last step of first episode
         active_episode = active_episode * (1 - done) # once the first episode is done, active_episode will become and stay 0
-        
-        cumulative_reward += reward * active_episode
     
-        
-
+        control_cost_fitness += env._state.info["fitness_control_cost_and_survive"] * active_episode
+        forward_fitness += env._state.info["fitness_forward"] * active_episode
+    
+        current_foot_contacts = env._state.info["bd_foot_contacts"]
         # bd is sometimes nan and inf (we multiply by 0 in those cases, but still infects with nan...)
-        info_bd = jnp.nan_to_num(info["bd"],nan=0.0, posinf=0.0, neginf=0.0)
-        bds = bds + last_step_of_first_episode.reshape(-1,1) * info_bd
+        current_foot_contacts = jnp.nan_to_num(info["bd"],nan=0.0, posinf=0.0, neginf=0.0)
         
-        # even when bd is not final pos, it is good to have the final position for plotting purpuses
-        # we want to take the xy pos of the body (coord system is z up, right handed)
-        # the pos is in the shape of [batch_dim,num_bodies,3]
-        # we want to take body 0, because that is the torso i think for all robots
-        current_pos = env._state.qp.pos[:,0,0:2]  
-        final_pos = final_pos + last_step_of_first_episode.reshape(-1,1) * current_pos
+        final_pos = final_pos + last_step_of_first_episode.reshape(-1,1) * before_step_pos
+        foot_contacts = foot_contacts + last_step_of_first_episode.reshape(-1,1) * current_foot_contacts
+        distance_walked = distance_walked + last_step_of_first_episode * before_step_distance_walked
+        if IS_DIRECTIONAL_MODE is True:
+            directional_fitness = directional_fitness + last_step_of_first_episode * before_step_directional_fitness
 
         # record observation stats, only count active episodes (zero out others)
         active_obs = active_episode.reshape(-1,1) * obs
         obs_sums = obs_sums + jnp.sum(active_obs,axis=0)
         obs_squared_sums = obs_squared_sums + jnp.sum(active_obs*active_obs,axis=0)
         obs_count = obs_count + jnp.sum(active_episode)
-    
+
+        # no more active episodes, we can return
+        if jnp.sum(active_episode) == 0:
+            break
+
     # turn back obs stats into normal cpu format
     new_obs_stats = {
         "sum" : np.array(obs_sums),
@@ -281,6 +250,126 @@ def rollout_episodes(env,params,obs_stats,config,
         "count" : obs_count[0],
     }
     
-    return cumulative_reward,bds,new_obs_stats,final_pos
+    results = {
+        "control_cost_fitness" : control_cost_fitness,
+        "forward_fitness" : forward_fitness,
+        "distance_walked" : distance_walked,
+        "normal_fitness" : control_cost_fitness + forward_fitness,
+        
+        "final_pos" : final_pos,
+        "foot_contacts" : foot_contacts,
+    }
+    if IS_DIRECTIONAL_MODE is True:
+        results["directional_fitness"] = directional_fitness
+    
+    fitness_mode,bd_mode = brax_envs.env_mode_interpret(config["env_mode"])
+    if fitness_mode == "NORMAL":
+        results["fitnesses"] = results["normal_fitness"]
+    elif fitness_mode == "DISTANCE":
+        results["fitnesses"] = results["distance_walked"]
+    elif fitness_mode == "CONTROL":
+        results["fitnesses"] = results["control_cost_fitness"]
+    elif fitness_mode == "DIRECTIONAL":
+        results["fitnesses"] = results["directional_fitness"]
+    
+    if bd_mode == "CONTACT":
+        results["bds"] = results["foot_contacts"]
+    elif bd_mode == "FINAL_POS":
+        results["bds"] = results["final_pos"] 
 
+    return results,new_obs_stats
+
+
+
+
+# def rollout_episodes(env,params,obs_stats,config,
+#                      batched_model_apply_fn):
+#     # env - gym wrapped batched brax env
+#     # params - batched parameter tree
+#     # obs_stats - obervation statistics for mean and var calculation for normalization
+#     #
+#     # Return
+#     # cumulative_reward - episode rewards
+#     # bds - episode behavior descriptors
+#     # new_obs_stats - updated obs_stats
+    
+    
+    
+    
+#     if config["env_deterministic"] is True:
+#         # if deterministic, we set the same key for every reset
+#         # the key is only used to add some random perturbation to the starting position, so it is only relevant to do before we call reset
+#         env.seed(666)
+#     obs = env.reset()
+    
+    
+#     cumulative_reward = jnp.zeros(obs.shape[0])
+#     active_episode = jnp.ones_like(cumulative_reward)
+#     bd_dim = env._state.info["bd"].shape[1]
+#     bds = jnp.zeros([obs.shape[0],bd_dim])
+
+#     final_pos = jnp.zeros([obs.shape[0],2]) 
+
+#     # prepare obs stats
+#     mean,var = map_elite_utils.calculate_obs_stats(obs_stats)
+#     mean = jnp.array(mean) # copy to gpu
+#     var = jnp.array(var)
+    
+#     # also prepare variable to accumulate values to calcuate obs stats, we will add new obs and return these
+#     obs_sums = jnp.array(obs_stats["sum"])
+#     obs_squared_sums = jnp.array(obs_stats["sumsq"])
+#     obs_count = jnp.array([obs_stats["count"]])
+    
+    
+#     max_steps = config["episode_max_length"]
+    
+#     for step_i in range(max_steps):
+    
+#         normalized_obs = (obs-mean) / var
+        
+#         model_out = batched_model_apply_fn(params,normalized_obs)
+#         action = get_deterministic_actions(model_out)
+    
+#         # even when bd is not final pos, it is good to have the final position for plotting purpuses
+#         # we want to take the xy pos of the body (coord system is z up, right handed)
+#         # the pos is in the shape of [batch_dim,num_bodies,3]
+#         # we want to take body 0, because that is the torso i think for all robots
+#         # we have to take the pos before step, because once the episode is done, pos will be zerod out
+#         before_step_pos = env._state.qp.pos[:,0,0:2]
+    
+#         obs,reward,done,info = env.step(action)
+        
+#         if step_i == (max_steps-1): # if we reached the max time limit, set done to 1 
+#             done = jnp.ones_like(done) 
+#         last_step_of_first_episode = active_episode * done # will only ever be 1 when we are at last step of first episode
+#         active_episode = active_episode * (1 - done) # once the first episode is done, active_episode will become and stay 0
+        
+#         cumulative_reward += reward * active_episode
+    
+        
+
+#         # bd is sometimes nan and inf (we multiply by 0 in those cases, but still infects with nan...)
+#         info_bd = jnp.nan_to_num(info["bd"],nan=0.0, posinf=0.0, neginf=0.0)
+#         bds = bds + last_step_of_first_episode.reshape(-1,1) * info_bd
+        
+#         final_pos = final_pos + last_step_of_first_episode.reshape(-1,1) * before_step_pos
+
+#         # record observation stats, only count active episodes (zero out others)
+#         active_obs = active_episode.reshape(-1,1) * obs
+#         obs_sums = obs_sums + jnp.sum(active_obs,axis=0)
+#         obs_squared_sums = obs_squared_sums + jnp.sum(active_obs*active_obs,axis=0)
+#         obs_count = obs_count + jnp.sum(active_episode)
+    
+#         # no more active episodes, we can return
+#         if jnp.sum(active_episode) == 0:
+#             break
+    
+#     # turn back obs stats into normal cpu format
+#     new_obs_stats = {
+#         "sum" : np.array(obs_sums),
+#         "sumsq" : np.array(obs_squared_sums),
+#         "count" : obs_count[0],
+#     }
+    
+#     return cumulative_reward,bds,new_obs_stats,final_pos
 

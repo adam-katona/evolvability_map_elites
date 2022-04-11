@@ -16,6 +16,7 @@ def run_es_experiment():
     
     config_defaults = {
         "env_name" : "ant", #  ant, walker, hopper, halfcheetah, humanoid, ant_omni, humanoid_omni
+        "env_mode" : "NORMAL_CONTACT",
         "episode_max_length" : 1000,
         "env_deterministic" : True, 
         

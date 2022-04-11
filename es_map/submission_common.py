@@ -4,6 +4,7 @@ import os
 import wandb
 
 from es_map import jax_evaluate
+from es_map.my_brax_envs import brax_envs
 
 
 def set_up_dask_client(n_workers=50):
@@ -80,7 +81,7 @@ def get_bc_descriptor_for_env(env_id):
 
 def setup_wandb(config_defaults,project_name):
     
-    
+    brax_envs.env_to_bd_descriptor
     import types
     if isinstance(wandb.config, types.FunctionType):
         # wandb config is a function, which means wandb is not inited, we are not in a sweep
@@ -110,13 +111,11 @@ def setup_wandb_jax(config_defaults,project_name):
     import types
     if isinstance(wandb.config, types.FunctionType):
         # wandb config is a function, which means wandb is not inited, we are not in a sweep
-        bd_descriptor = jax_evaluate.brax_get_bc_descriptor_for_env(config_defaults["env_name"])
+        bd_descriptor = brax_envs.env_to_bd_descriptor(config_defaults["env_name"],config_defaults["env_mode"])
         config_defaults["map_elites_grid_description"] = bd_descriptor
     else:
-        bd_descriptor = jax_evaluate.brax_get_bc_descriptor_for_env(wandb.config["env_name"])
+        bd_descriptor = brax_envs.env_to_bd_descriptor(wandb.config["env_name"],wandb.config["env_mode"])
         config_defaults["map_elites_grid_description"] = bd_descriptor
-
-    
     
     
     wandb.init(project=project_name, entity="adam_katona",config=config_defaults,dir="/scratch/ak1774/runs") # this is a bit vauge how this happens but default will not set values already set by a sweep

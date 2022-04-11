@@ -121,6 +121,7 @@ def train(config,wandb_logging=True):
     config["map_elites_grid_description"] = bd_descriptor
 
     env_name = config["env_name"]
+    env_mode = config["env_mode"]
     population_size = config["ES_popsize"]
 
     
@@ -143,7 +144,7 @@ def train(config,wandb_logging=True):
         json.dump(config, file,indent=4)
     
     # setup env and model
-    env = jax_evaluate.create_env(env_name,population_size,config["ES_CENTRAL_NUM_EVALUATIONS"],config["episode_max_length"])
+    env = jax_evaluate.create_env(env_name,env_mode,population_size,config["ES_CENTRAL_NUM_EVALUATIONS"],config["episode_max_length"])
     model = jax_evaluate.create_MLP_model(env.observation_space.shape[1],env.action_space.shape[1])
 
 
@@ -189,27 +190,23 @@ def train(config,wandb_logging=True):
                                                                           eval_batch_size=config["ES_CENTRAL_NUM_EVALUATIONS"],sigma=config["ES_sigma"])
         all_model_params = batch_vec_to_params(all_params,shapes,indicies)
         
-        # Evaluate pop
-        fitness,bds,new_obs_stats,final_pos = jax_evaluate.rollout_episodes(env,all_model_params,observation_stats,config,
+        rollout_results,new_obs_stats = jax_evaluate.rollout_episodes(env,all_model_params,observation_stats,config,
                                                                             batch_model_apply_fn)
+        observation_stats = new_obs_stats 
+        
+        # used for es updates
+        fitness = rollout_results["fitnesses"]
+        bds = rollout_results["bds"]
+        
         child_bds = bds[:population_size]
         eval_bds = bds[population_size:]
         child_fitness = fitness[:population_size]
         eval_fitness = fitness[population_size:]
-        child_final_pos = np.array(final_pos[:population_size])
-        eval_final_pos = np.array(final_pos[population_size:])
         
-        mean_dist = np.mean(np.sqrt(child_final_pos[:,0]**2 + child_final_pos[:,1]**2))
-        eval_mean_dist = np.mean(np.sqrt(eval_final_pos[:,0]**2 + eval_final_pos[:,1]**2))
-        
-        mean_child_bd = np.mean(np.array(child_bds),axis=0)
-        mean_eval_bd = np.mean(np.array(eval_bds),axis=0)
-        
-        print(generation_number,np.mean(np.array(eval_fitness)),eval_mean_dist)
-        
+
         # Calculate novelties, innovation end evolvabilities
-        
-        b_archive.append(jnp.array(mean_eval_bd))
+        mean_eval_bd = jnp.mean(eval_bds,axis=0)
+        b_archive.append(mean_eval_bd)
         
         b_archive_array = jnp.stack(b_archive)
         child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
@@ -218,10 +215,11 @@ def train(config,wandb_logging=True):
         evo_var = jax_evaluate.calculate_evo_var(bds)
         evo_ent = jax_evaluate.calculate_evo_ent(bds,config)
         
+        # Calculate mapping performance
         if config["PLAIN_ES_TEST_ELITE_MAPPING_PERFORMANCE"] is True:
             if generation_number % config["PLAIN_ES_TEST_ELITE_MAPPING_FREQUENCY"] == 0:
                 map_perf = test_elite_mapping_performance(b_map_cumm,child_fitness,child_bds,config)
-                wandb.log(map_perf)   
+                wandb.log(map_perf,commit=False)   
                 
         
         # Calculate grad and do grad update
@@ -231,21 +229,47 @@ def train(config,wandb_logging=True):
         grad = torch.from_numpy(np.array(grad))
         updated_params,optimizer_state = jax_es_update.do_gradient_step(current_params,grad,optimizer_state,config)
         
+        ########################
+        ## LOGGING / PLOTTING ##
+        ########################
+
+        normal_fitness = rollout_results["normal_fitness"]
+        distance_walked = rollout_results["distance_walked"]
+        control_cost = rollout_results["control_cost_fitness"]
         
+        mean_dist = jnp.mean(distance_walked[:population_size])
+        max_dist = jnp.max(distance_walked[:population_size])
+        eval_mean_dist = jnp.mean(distance_walked[population_size:])
+        
+        mean_normal_fitness = jnp.mean(normal_fitness[:population_size])
+        eval_normal_fitness = jnp.mean(normal_fitness[population_size:])
+        
+        mean_control_cost = jnp.mean(control_cost[:population_size])
+        max_control_cost = jnp.max(control_cost[:population_size])
+        eval_control_cost = jnp.mean(control_cost[population_size:])
+        
+        
+        print(generation_number,eval_normal_fitness,eval_mean_dist,max_dist)
         
         # Do the step logging 
         step_logs = {
             "generation_number" : generation_number,
             "evaluations_so_far" : generation_number*config["ES_popsize"],
 
-            "children_fitness" : np.mean(np.array(child_fitness)),
-            "eval_fitness" : np.mean(np.array(eval_fitness)),
+            # Log the 3 kind of fitness
+            "mean_normal_fitness" : mean_normal_fitness,
+            "eval_normal_fitness" : eval_normal_fitness,
+            
+            "mean_control_cost" : mean_control_cost,
+            "max_control_cost" : max_control_cost,
+            "eval_control_cost" : eval_control_cost,
+            
             "mean_dist" : mean_dist,
+            "max_dist" : max_dist,
             "eval_mean_dist" : eval_mean_dist,
-            
-            "mean_child_bd" : mean_child_bd,
-            "mean_eval_bd" : mean_eval_bd,
-            
+
+            # we dont log the bd, because it is multi dimensinal.
+            # but we log entropy, variance and innovation            
             "innovation" : innovation,
             "evo_var" : evo_var,
             "evo_ent" : evo_ent,
@@ -265,20 +289,20 @@ def train(config,wandb_logging=True):
             
         current_params = updated_params
         generation_number += 1
-        
     
     # final save
+    final_rollout_arrays = {name : np.array(arr) for name,arr in rollout_results}
+    np.savez(run_checkpoint_path+"/final_rollout_arrays.npz",final_rollout_arrays) # to load do: dict(np.load(run_checkpoint_path+"/final_rollout_arrays.npz"))
+    
     if len(b_archive) > 0:
         b_archive_array = np.stack(b_archive)  
         np.save(run_checkpoint_path+"/b_archive.npy",b_archive_array)
     with open(run_checkpoint_path+'/obs_stats.pickle', 'wb') as handle:
         pickle.dump(observation_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
     np.save(run_checkpoint_path+"/theta.npy",current_params)
-    np.save(run_checkpoint_path+"/bd_distribution.npy",np.array(child_bds))
-    np.save(run_checkpoint_path+"/fitness_distribution.npy",np.array(child_fitness))
-    np.save(run_checkpoint_path+"/final_pos_distribution.npy",np.array(child_final_pos))
     if config["PLAIN_ES_TEST_ELITE_MAPPING_PERFORMANCE"] is True:
         np.save(run_checkpoint_path+"/b_map_cumm.npy",b_map_cumm.data,allow_pickle=True)
+    
     
             
         
