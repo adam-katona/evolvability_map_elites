@@ -143,7 +143,7 @@ def calculate_evo_ent(bds,config):
 
 
 
-def rollout_flexible_episodes(env,params,obs_stats,config,
+def rollout_episodes(env,params,obs_stats,config,
                               batched_model_apply_fn):
     # env - gym wrapped batched brax env
     # params - batched parameter tree
@@ -159,14 +159,14 @@ def rollout_flexible_episodes(env,params,obs_stats,config,
 
     IS_DIRECTIONAL_MODE = ("DIRECTIONAL" in config["env_mode"])
 
-    control_cost_fitness = jnp.zeros(env._state.info["fitness_control_cost_and_survive"])
-    forward_fitness = jnp.zeros(env._state.info["fitness_forward"])
-    distance_walked = jnp.zeros(env._state.info["fitness_distance_walked"])
+    control_cost_fitness = jnp.zeros_like(env._state.info["fitness_control_cost_and_survive"])
+    forward_fitness = jnp.zeros_like(env._state.info["fitness_forward"])
+    distance_walked = jnp.zeros_like(env._state.info["fitness_distance_walked"])
     if IS_DIRECTIONAL_MODE is True:
-        directional_fitness = jnp.zeros(env._state.info["fitness_directional_distance"])
+        directional_fitness = jnp.zeros_like(env._state.info["fitness_directional_distance"])
 
     final_pos = jnp.zeros_like(env._state.info["bd_final_pos"])
-    foot_contacts = jnp.zeros_like(env._state.info["bd_foot_contacts"])
+    foot_contacts = jnp.zeros_like(env._state.info["contact_cum"])
 
     # we have 2 kinds of values, the cummulatives, which needs to be summed until the end of the first episode,
     #                            and the ones which have to be read only once at the end of the episode
@@ -223,9 +223,10 @@ def rollout_flexible_episodes(env,params,obs_stats,config,
         control_cost_fitness += env._state.info["fitness_control_cost_and_survive"] * active_episode
         forward_fitness += env._state.info["fitness_forward"] * active_episode
     
-        current_foot_contacts = env._state.info["bd_foot_contacts"]
+        #current_foot_contacts = env._state.info["bd_foot_contacts"]
+        current_foot_contacts = env._state.info["contact_cum"] / float(step_i+1)
         # bd is sometimes nan and inf (we multiply by 0 in those cases, but still infects with nan...)
-        current_foot_contacts = jnp.nan_to_num(info["bd"],nan=0.0, posinf=0.0, neginf=0.0)
+        current_foot_contacts = jnp.nan_to_num(current_foot_contacts,nan=0.0, posinf=0.0, neginf=0.0)
         
         final_pos = final_pos + last_step_of_first_episode.reshape(-1,1) * before_step_pos
         foot_contacts = foot_contacts + last_step_of_first_episode.reshape(-1,1) * current_foot_contacts

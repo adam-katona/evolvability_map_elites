@@ -3,6 +3,7 @@
 # A simple ES loop
 # A training loop for plain es with jax
 import random
+import os
 import numpy as np
 import torch
 import brax
@@ -22,6 +23,7 @@ import json
 #from es_map import map_elite_utils
 from es_map import jax_evaluate
 from es_map import jax_es_update
+from es_map.my_brax_envs import brax_envs
 
 import wandb
 
@@ -50,7 +52,7 @@ from es_map import map_elite_utils
 # note that we olny do this with fitness maps, no need to recalculate innovation or stuff like that
 # note that instead of sampling children, we just use the children used for calculating the grad
 # we can do this because evaluating once is fine if env is deterministic
-def test_elite_mapping_performance(b_map_cumm,child_fitness,child_bds,config):
+def test_elite_mapping_performance(b_map_cumm,child_fitness,child_bds,config,prefix):
     
     b_map = behavior_map.create_b_map_grid(config)
     
@@ -95,11 +97,11 @@ def test_elite_mapping_performance(b_map_cumm,child_fitness,child_bds,config):
     
     results = {
         #"nonempty_cells" : len(non_empty_cells),
-        "nonempty_ratio" : float(len(non_empty_cells)) / b_map.data.size,
-        "qd_score" : qd_score,
+        prefix+"_nonempty_ratio" : float(len(non_empty_cells)) / b_map.data.size,
+        prefix+"_qd_score" : qd_score,
         #"cumm_nonempty_cells" : len(cumm_non_empty_cells),
-        "cumm_nonempty_ratio" : float(len(cumm_non_empty_cells)) / b_map_cumm.data.size,
-        "cumm_qd_score" : cumm_qd_score,
+        prefix+"_cumm_nonempty_ratio" : float(len(cumm_non_empty_cells)) / b_map_cumm.data.size,
+        prefix+"_cumm_qd_score" : cumm_qd_score,
         #"b_map_plot" : fig_f,
         #"b_map_cumm_plot" : fig_f_cumm,
         #"b_map_accumulation_plot" : fig_accumulation,
@@ -117,7 +119,8 @@ def train(config,wandb_logging=True):
     if type(config) != type(dict()):
         config = config.as_dict()
 
-    bd_descriptor = jax_evaluate.brax_get_bc_descriptor_for_env(config["env_name"])
+    #bd_descriptor = jax_evaluate.brax_get_bc_descriptor_for_env(config["env_name"])
+    bd_descriptor = brax_envs.env_to_bd_descriptor(config["env_name"],config["env_mode"])
     config["map_elites_grid_description"] = bd_descriptor
 
     env_name = config["env_name"]
@@ -127,10 +130,14 @@ def train(config,wandb_logging=True):
     
     if wandb_logging is True:   
         run_name = wandb.run.dir.split("/")[-2]
+        run_checkpoint_path = "/scratch/ak1774/runs/large_files_jax/" + run_name
+        # this folder is already created for us previously
     else:
         from datetime import datetime
         run_name = "local_dubug_run_" + datetime.now().strftime("_%m_%d___%H:%M")
-    run_checkpoint_path = "/scratch/ak1774/runs/large_files_jax/" + run_name
+        run_checkpoint_path = "/scratch/ak1774/runs/local_runs/" + run_name
+        os.mkdir(run_checkpoint_path)
+    
     
     # setup random seed
     seed = random.randint(0, 10000000000)
@@ -165,7 +172,19 @@ def train(config,wandb_logging=True):
 
     b_archive = [] # we append bcs, and do: b_archive_array = jnp.stack(b_archive)   
     if config["PLAIN_ES_TEST_ELITE_MAPPING_PERFORMANCE"] is True:
-        b_map_cumm = behavior_map.create_b_map_grid(config)
+        # test elite mapping for both metric (foot contacts and final pos)
+        # create some fake configs, to create maps for both metrics
+        all_map_perf_logs = []
+        config_pos = copy.deepcopy(config)
+        config_contact = copy.deepcopy(config)
+        config_pos["env_mode"] = "NORMAL_FINAL_POS"
+        config_contact["env_mode"] = "NORMAL_CONTACT"
+        bd_descriptor_pos = brax_envs.env_to_bd_descriptor(config_pos["env_name"],config_pos["env_mode"])
+        bd_descriptor_contact = brax_envs.env_to_bd_descriptor(config_contact["env_name"],config_contact["env_mode"])
+        config_pos["map_elites_grid_description"] = bd_descriptor_pos
+        config_contact["map_elites_grid_description"] = bd_descriptor_contact
+        b_map_cumm_pos = behavior_map.create_b_map_grid(config_pos)
+        b_map_cumm_contact = behavior_map.create_b_map_grid(config_contact)
      
     all_step_logs = []
     optimizer_state = None
@@ -218,8 +237,16 @@ def train(config,wandb_logging=True):
         # Calculate mapping performance
         if config["PLAIN_ES_TEST_ELITE_MAPPING_PERFORMANCE"] is True:
             if generation_number % config["PLAIN_ES_TEST_ELITE_MAPPING_FREQUENCY"] == 0:
-                map_perf = test_elite_mapping_performance(b_map_cumm,child_fitness,child_bds,config)
-                wandb.log(map_perf,commit=False)   
+                map_perf_pos = test_elite_mapping_performance(b_map_cumm_pos,child_fitness,
+                                                              rollout_results["final_pos"][:population_size],
+                                                              config_pos,prefix="pos")
+                map_perf_contact = test_elite_mapping_performance(b_map_cumm_contact,child_fitness,
+                                                                  rollout_results["foot_contacts"][:population_size],
+                                                                  config_contact,prefix="contact")
+                map_perf = {**map_perf_pos, **map_perf_contact}
+                all_map_perf_logs.append(map_perf)
+                if wandb_logging is True: 
+                    wandb.log(map_perf,commit=False)   
                 
         
         # Calculate grad and do grad update
@@ -291,7 +318,7 @@ def train(config,wandb_logging=True):
         generation_number += 1
     
     # final save
-    final_rollout_arrays = {name : np.array(arr) for name,arr in rollout_results}
+    final_rollout_arrays = {name : np.array(arr) for name,arr in rollout_results.items()}
     np.savez(run_checkpoint_path+"/final_rollout_arrays.npz",final_rollout_arrays) # to load do: dict(np.load(run_checkpoint_path+"/final_rollout_arrays.npz"))
     
     if len(b_archive) > 0:
@@ -299,9 +326,13 @@ def train(config,wandb_logging=True):
         np.save(run_checkpoint_path+"/b_archive.npy",b_archive_array)
     with open(run_checkpoint_path+'/obs_stats.pickle', 'wb') as handle:
         pickle.dump(observation_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
     np.save(run_checkpoint_path+"/theta.npy",current_params)
     if config["PLAIN_ES_TEST_ELITE_MAPPING_PERFORMANCE"] is True:
-        np.save(run_checkpoint_path+"/b_map_cumm.npy",b_map_cumm.data,allow_pickle=True)
+        np.save(run_checkpoint_path+"/b_map_cumm_pos.npy",b_map_cumm_pos.data,allow_pickle=True)
+        np.save(run_checkpoint_path+"/b_map_cumm_contact.npy",b_map_cumm_contact.data,allow_pickle=True)
+        with open(run_checkpoint_path+'/map_perf.pickle', 'wb') as handle:
+            pickle.dump(all_map_perf_logs, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
     
             
