@@ -19,6 +19,7 @@ import wandb
 
 from es_map import jax_evaluate
 from es_map import jax_es_update
+from es_map.my_brax_envs import brax_envs
 
 from es_map import submission_common
 from es_map import behavior_map
@@ -27,15 +28,162 @@ from es_map import behavior_map
 from es_map import nd_sort
 
 
-def train(config,wandb_logging=True):
+# One of the contribution of evolvability map elites
+# is to actually select for evolvability or innovation and even excpected fitness
+# Because previous work always selected for fitness. I understand why, 
+# because they actually want elite performers, not elite evolvers
+# But since we select for elite evolvers, we lose the ability to find the elite performers/ For this reason we introduce 2 maps
+# One is for selecting parents, the other is for finding the elite performers.
+# elite_performance_map: is used for remembering the elite performers
+# elite_evolver_map (b_map): used for selecting perents, contains the elite evolvers.
 
-    print("staring run_es_map_elites")
+# INSERTION DECISION
+# Elite performance map works like previous map elite maps, always make insertion decision based on eval_fitness
+# For Elite evolver map, there are all kinds of options for the inserition decision, but it is based on 3 values
+# - excepcted fitness of offspring
+# - excpected novelty of offspring
+# - entropy of offspring
+
+# Also elite_evolver_map have 3 kinds
+# - single map -> use single metric
+# - multi map -> use multiple metric,
+#                each metric have a separate single map
+#                on insertion, we try inserting in each map
+#                on selection, we can select from each map
+# - nd_sorted map -> multiple metric, each cell in map contains a nondominated front of elites
+#                    on insertion, we sort elites and the candidate, and keep the first n
+#                    on selection, we select from the front.
+
+
+
+
+
+
+
+
+
+# One detail is that every time we compare innovcation, we need to recalculate it for the current archive.
+def update_innovation_of_cells(cells,b_archive_array,batch_calculate_novelty_fn):
+    for cell in cells:
+        child_bds = jnp.array(cell["child_eval"]["bcs"])
+        child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
+        innovation = jnp.mean(child_novelties).item() # innovation is excpected novelty
+        cell["innovation"] = innovation
+
+
+def select_parent_from_single_map(b_map,config,b_archive_array,batch_calculate_novelty_fn):
+    non_empty_cells = b_map.get_non_empty_cells()
+    if config["ES_PARENT_SELECTION_MODE"] == "uniform":
+        parent_cell = np.random.choice(non_empty_cells)  # NOTE, here goes cell selection method
+    elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
+        # use the metric of the map, to do ranked selection
+        metric = config["BMAP_type_and_metrics"]["metrics"][0] # single_map have 1 metric
+        if metric == "innovation":
+            update_innovation_of_cells(non_empty_cells,b_archive_array,batch_calculate_novelty_fn)
+        sorted_cells = sorted(non_empty_cells,key=lambda x : x["elite"][metric])                
+        selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_cells),
+                                                num_children=None, # only want a single parent
+                                                agressiveness=config["ES_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS"])
+        parent_cell = sorted_cells[selected_index]
+    return parent_cell["elite"]
+
+def select_parent_from_multi_map(b_map,config,b_archive_array,batch_calculate_novelty_fn):
+    # Here we could use selected_update_mode, and try to select a metric which plays well with selected_update_mode
+    # For example we we are updating for evolvability, maybe select high evolvability parents...
+    # But for 2 reasons we dont do this
+    # Reason 1: we want to benefit from synergies, maybe high fitness will lead to high evolvability, etc...
+    # Reason 2: If we dont have an update mode for it, we will never select it, so it is pointless to have that map...
+    
+    selected_metric = np.random.choice(config["BMAP_type_and_metrics"]["metrics"])
+    non_empty_cells = b_map.get_non_empty_cells(selected_metric)
+    
+    if config["ES_PARENT_SELECTION_MODE"] == "uniform":
+        parent_cell = np.random.choice(non_empty_cells)  # NOTE, here goes cell selection method
+        
+    elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
+        # TODO if selected metric is innovation, we actually need to recalcualte it
+        if selected_metric == "innovation":
+            update_innovation_of_cells(non_empty_cells,b_archive_array,batch_calculate_novelty_fn)
+        sorted_cells = sorted(non_empty_cells,key=lambda x : x["elite"][selected_metric])                
+        selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_cells),
+                                                num_children=None, # only want a single parent
+                                                agressiveness=config["ES_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS"])
+        parent_cell = sorted_cells[selected_index]
+    return parent_cell["elite"]
+
+    
+
+def select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculate_novelty_fn):
+    
+    non_empty_cells = b_map.get_non_empty_cells()
+    if config["ES_PARENT_SELECTION_MODE"] == "uniform":
+        selected_cell = np.random.choice(non_empty_cells)
+        selected_individual = np.random.choice(selected_cell["elites"])
+    elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
+        if "innovation" in config["BMAP_type_and_metrics"]["metrics"]:
+            update_innovation_of_cells(non_empty_cells,b_archive_array,batch_calculate_novelty_fn)
+        # We could do a nondominated sort on the combined elites of every cell, and use the nd rank
+        # Let us do that
+        all_elite_objectives = []
+        all_elite_indicies = []
+        for cell_i,cell in enumerate(non_empty_cells):
+            for elite_i,elite in enumerate(cell["elites"]):
+                all_elite_indicies.append((cell_i,elite_i))
+                objectives = []
+                for metric in config["BMAP_type_and_metrics"]["metrics"]:
+                    objectives.append(elite[metric])
+                all_elite_objectives.append(np.array(objectives))
+        
+        all_elite_objectives = np.stack(all_elite_objectives)
+        multi_objective_fitnesses = jnp.array(all_elite_objectives)
+        domination_matrix = nd_sort.jax_calculate_domination_matrix(multi_objective_fitnesses)
+        
+        # copy back to cpu for rest of the computation
+        domination_matrix = np.array(domination_matrix) 
+        multi_objective_fitnesses = np.array(multi_objective_fitnesses)
+         
+        fronts = nd_sort.numba_calculate_pareto_fronts(domination_matrix)
+        nondomination_rank_dict = nd_sort.fronts_to_nondomination_rank(fronts)
+        crowding = nd_sort.calculate_crowding_metrics(multi_objective_fitnesses,fronts)
+        sorted_indicies = nd_sort.nondominated_sort(nondomination_rank_dict,crowding)
+        # nondominated sort sorts, so best is first. This is opposite to what we did in the other cases, reverse the indicies.
+        sorted_indicies = sorted_indicies[::-1]
+        
+        selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_indicies),
+                                                num_children=None, # only want a single parent
+                                                agressiveness=config["ES_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS"])
+        
+        selected_indicies = all_elite_indicies[sorted_indicies[selected_index]]
+        selected_cell = non_empty_cells[selected_indicies[0]]
+        selected_individual = selected_cell["elites"][selected_indicies[1]]
+        
+    return selected_individual
+    
+    
+    
+
+def select_parent_from_map(b_map,config,b_archive_array,batch_calculate_novelty_fn):
+    if config["BMAP_type_and_metrics"]["type"] == "single_map":
+        return select_parent_from_single_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
+    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+        return select_parent_from_multi_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
+    elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        return select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
+    else:
+        raise "unknown BMAP_type"
+
+
+    
+
+
+def train(config,wandb_logging=True):
     
     if type(config) != type(dict()):
         config = config.as_dict()
     
     from es_map import jax_evaluate
-    config_defaults["map_elites_grid_description"] = jax_evaluate.brax_get_bc_descriptor_for_env(config["env_name"])
+    bd_descriptor = brax_envs.env_to_bd_descriptor(config["env_name"],config["env_mode"])
+    config["map_elites_grid_description"] = bd_descriptor
 
     if wandb_logging is True:   
         run_name = wandb.run.dir.split("/")[-2]
@@ -98,6 +246,104 @@ def train(config,wandb_logging=True):
         if generation_number >= config["ES_NUM_GENERATIONS"]:
             print("Done, reached iteration: ",config["ES_NUM_GENERATIONS"])
             break
+
+
+
+        ##############################################
+        ## Populate the map with random individuals ##
+        ##############################################
+        
+        # Let us skip this step, and start with a single random individual
+        
+        
+        
+        ######################################
+        ## PARENT AND UPDATE MODE SELECTION ##
+        ######################################
+        
+        # Choose an update mode
+        es_update_mode = np.random.choice(config["ES_UPDATES_MODES_TO_USE"])
+        
+        # Choose a parent
+        if generation_number == 0:
+            current_individual = first_parent
+        else:
+            if config["BMAP_type_and_metrics"]["type"] == "single_map":
+                pass
+            elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+                # how do we 
+            elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+                pass
+        
+        
+        ##################
+        ## UPDATE STEPS ##
+        ##################
+        for update_step_i in range(config["ES_STEPS_UNTIL_NEW_PARENT_SELECTION"]):
+        
+            #######################
+            ## EVALUATE CHILDREN ##
+            #######################
+            
+            
+            ##################
+            ## DO ES UPDATE ##
+            ##################
+            
+            
+            ############################
+            ## EVALUATE UPDATED THETA ##
+            ############################
+            
+            ##################################
+            ## EVALUATE CHILDREN OF UPDATED ##
+            ##################################
+            
+            
+            #########################
+            ## INSERT INTO ARCHIVE ##
+            #########################
+            
+            
+            ################################
+            ## PREPARE FOR NEXT ITERATION ##
+            ################################
+            
+            
+            ########################
+            ## EVERY STEP LOGGING ##
+            ########################
+            
+            ####################
+            ## N STEP LOGGING ##
+            ####################
+            
+            
+            ###################
+            ## CHECKPOINTING ##
+            ###################
+            # Dont really do checkpointing any more, final sive is enough
+            
+            generation_number += 1
+            
+            
+        ################
+        ## FINAL SAVE ##
+        ################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         # NOTE we skip initial random population, we use a single individual as the first parent
         
