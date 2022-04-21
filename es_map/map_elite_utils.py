@@ -2,6 +2,7 @@ import numpy as np
 import itertools
 import matplotlib.pyplot as plt
 import scipy.spatial.distance
+import jax.numpy as jnp
 
 from es_map import nd_sort
         
@@ -304,9 +305,12 @@ def try_insert_individual_in_map(new_individual,b_map,b_archive,config,batch_cal
         if len(metrics) < 2:
             raise "Error, why use multi map if you only have one metric!!"
         
+        any_inserted = False
         for metric in metrics:
             map_coords = b_map.get_cell_coords(new_individual["eval_bc"],metric)
-            return try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,config,batch_calculate_novelty_fn)
+            inserted = try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,config,batch_calculate_novelty_fn)
+            any_inserted = any_inserted or inserted
+        return any_inserted
         
     elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
         # nd uses all the metrics at the same time, to sort individuals, and keep the 

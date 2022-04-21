@@ -63,23 +63,35 @@ from es_map import nd_sort
 
 
 # One detail is that every time we compare innovcation, we need to recalculate it for the current archive.
-def update_innovation_of_cells(cells,b_archive_array,batch_calculate_novelty_fn):
-    for cell in cells:
-        child_bds = jnp.array(cell["child_eval"]["bcs"])
+# NOTE, maybe this will be a bottleneck if the map is quite full.
+# it is already computed on the gpu, but maybe it can be even faster if we do it all in once, without the for.
+def update_innovation_of_map(non_empty_cells,config,b_archive_array,batch_calculate_novelty_fn):
+
+    if config["BMAP_type_and_metrics"]["type"] == "single_map":
+        individuals = [cell["elite"] for cell in non_empty_cells]
+    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+        individuals = []
+        for cell in non_empty_cells:
+            individuals.extend(cell["elites"])
+    elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        individuals = [cell["elite"] for cell in non_empty_cells]
+        
+    for individual in individuals:
+        child_bds = jnp.array(individual["child_eval"]["bds"])
         child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
         innovation = jnp.mean(child_novelties).item() # innovation is excpected novelty
-        cell["innovation"] = innovation
+        individual["innovation"] = innovation
 
 
 def select_parent_from_single_map(b_map,config,b_archive_array,batch_calculate_novelty_fn):
     non_empty_cells = b_map.get_non_empty_cells()
     if config["ES_PARENT_SELECTION_MODE"] == "uniform":
-        parent_cell = np.random.choice(non_empty_cells)  # NOTE, here goes cell selection method
+        parent_cell = np.random.choice(non_empty_cells)  
     elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
         # use the metric of the map, to do ranked selection
         metric = config["BMAP_type_and_metrics"]["metrics"][0] # single_map have 1 metric
         if metric == "innovation":
-            update_innovation_of_cells(non_empty_cells,b_archive_array,batch_calculate_novelty_fn)
+            update_innovation_of_map(non_empty_cells,config,b_archive_array,batch_calculate_novelty_fn)
         sorted_cells = sorted(non_empty_cells,key=lambda x : x["elite"][metric])                
         selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_cells),
                                                 num_children=None, # only want a single parent
@@ -98,12 +110,12 @@ def select_parent_from_multi_map(b_map,config,b_archive_array,batch_calculate_no
     non_empty_cells = b_map.get_non_empty_cells(selected_metric)
     
     if config["ES_PARENT_SELECTION_MODE"] == "uniform":
-        parent_cell = np.random.choice(non_empty_cells)  # NOTE, here goes cell selection method
+        parent_cell = np.random.choice(non_empty_cells) 
         
     elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
         # TODO if selected metric is innovation, we actually need to recalcualte it
         if selected_metric == "innovation":
-            update_innovation_of_cells(non_empty_cells,b_archive_array,batch_calculate_novelty_fn)
+            update_innovation_of_map(non_empty_cells,config,b_archive_array,batch_calculate_novelty_fn)
         sorted_cells = sorted(non_empty_cells,key=lambda x : x["elite"][selected_metric])                
         selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_cells),
                                                 num_children=None, # only want a single parent
@@ -118,12 +130,15 @@ def select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculat
     non_empty_cells = b_map.get_non_empty_cells()
     if config["ES_PARENT_SELECTION_MODE"] == "uniform":
         selected_cell = np.random.choice(non_empty_cells)
-        selected_individual = np.random.choice(selected_cell["elites"])
+        selected_individual = np.random.choice(selected_cell["elites"]) # select randomly from the front
     elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
         if "innovation" in config["BMAP_type_and_metrics"]["metrics"]:
-            update_innovation_of_cells(non_empty_cells,b_archive_array,batch_calculate_novelty_fn)
+            update_innovation_of_map(non_empty_cells,config,b_archive_array,batch_calculate_novelty_fn)
         # We could do a nondominated sort on the combined elites of every cell, and use the nd rank
         # Let us do that
+        # The complexity of sorting is n^2, so we might have problem for large maps.
+        # Especially, because each cell can have multiple elites.
+        # If we are below few 10K we are ok, our biggest map is 1296, so we are OK.
         all_elite_objectives = []
         all_elite_indicies = []
         for cell_i,cell in enumerate(non_empty_cells):
@@ -146,7 +161,8 @@ def select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculat
         nondomination_rank_dict = nd_sort.fronts_to_nondomination_rank(fronts)
         crowding = nd_sort.calculate_crowding_metrics(multi_objective_fitnesses,fronts)
         sorted_indicies = nd_sort.nondominated_sort(nondomination_rank_dict,crowding)
-        # nondominated sort sorts, so best is first. This is opposite to what we did in the other cases, reverse the indicies.
+        # nondominated sort sorts, so best is first. 
+        # rank_based_selection assumes that last is best, so let us reverse the order
         sorted_indicies = sorted_indicies[::-1]
         
         selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_indicies),
@@ -165,9 +181,9 @@ def select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculat
 def select_parent_from_map(b_map,config,b_archive_array,batch_calculate_novelty_fn):
     if config["BMAP_type_and_metrics"]["type"] == "single_map":
         return select_parent_from_single_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
-    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
-        return select_parent_from_multi_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
     elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        return select_parent_from_multi_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
+    elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
         return select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculate_novelty_fn)
     else:
         raise "unknown BMAP_type"
@@ -272,6 +288,7 @@ def train(config,wandb_logging=True):
                 pass
             elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
                 # how do we 
+                pass
             elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
                 pass
         
@@ -374,9 +391,11 @@ def train(config,wandb_logging=True):
                 current_individual = parent_cell["elite"]
             
             elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+                pass
                 
             
             elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
+                pass
 
 
 
