@@ -23,14 +23,14 @@ def run_es_experiment():
         
         "ALGORITHM_TYPE" : "PLAIN_ES",   # "PLAIN_ES", "MAP_ES", "MAP_GA"
 
-        "ES_NUM_GENERATIONS" : 500,  # was 1000
-        "ES_popsize" : 1000,
+        "ES_NUM_GENERATIONS" : 1000,  # was 1000
+        "ES_popsize" : 10000,
         "ES_sigma" : 0.02,
         "ES_OPTIMIZER_TYPE" : "ADAM",
         "ES_lr" : 0.01,
         "ES_L2_COEFF" : 0.005,  
         
-        "ES_CENTRAL_NUM_EVALUATIONS" : 50, # How many times central individual evaluated (pointless for deterministic...)
+        "ES_CENTRAL_NUM_EVALUATIONS" : 100, # How many times central individual evaluated (pointless for deterministic...)
         
         "ES_UPDATES_MODES_TO_USE" : ["fitness"], # "fitness","evo_var","evo_ent","innovation",...
         
@@ -45,33 +45,7 @@ def run_es_experiment():
         "BMAP_type_and_metrics" : {
             "type" : "single_map",
             "metrics" : ["eval_fitness"],
-        }
-        
-        
-        # TODO
-        #"map_elites_grid_description" : {
-        #    "bc_limits" : [[0,1],[0,1],[0,1],[0,1]],
-        #    "grid_dims" : [6,6,6,6],
-        #},
-        
-        # BMAP settings
-        #"BMAP_type_and_metrics" : {
-        #    "type" : "multi_map",    # type can be: "single_map","multi_map","nd_sorted_map" 
-        #    "metrics" : ["eval_fitness","evolvability"],    # metric can be: ["f"],["f",e], ["f,e,i"], etc... 
-        #},
-        #"ES_UPDATES_MODES_TO_USE" : ["fitness"],#"evolvability","innovation"], # list of updates to use # TODO add QE
-        #"ES_PARENT_SELECTION_MODE" : "rank_proportional",  # "uniform", "rank_proportional"
-        #"ES_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS" : 1.0,  # 0.0 uniform, 1.0 normal , higher more agressive
-        
-        #"ES_ND_SORT_MAX_FRONT_SIZE_TO_KEEP" : 6,
-        #"NOVELTY_CALCULATION_NUM_NEIGHBORS" : 10,
-        
-        # Using plain ES to fill MAP
-        #"FILL_MAP_WITH_OFFSPRING_NUM_CHILDREN" : 2000,  # Note that this is multiplied with ES_CENTRAL_NUM_EVALUATIONS
-        #"FILL_MAP_WITH_OFFSPRING_MEASURE_EVERY_N_GENERATIONS" : 100,  
-        
-        #"CHECKPOINT_FREQUENCY" : 100,
-        #"PLOT_FREQUENCY" : 100,
+        },
     }
 
     print("Initializing wandb")

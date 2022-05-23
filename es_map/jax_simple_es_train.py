@@ -225,10 +225,12 @@ def train(config,wandb_logging=True):
 
         # Calculate novelties, innovation end evolvabilities
         mean_eval_bd = jnp.mean(eval_bds,axis=0)
-        b_archive.append(mean_eval_bd)
         
-        b_archive_array = jnp.stack(b_archive)
-        child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
+        if len(b_archive) > 0:
+            b_archive_array = jnp.stack(b_archive)
+            child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
+        else:
+            child_novelties = jnp.zeros(population_size)
         innovation = jnp.mean(child_novelties).item() # innovation is excpected novelty
         
         evo_var = jax_evaluate.calculate_evo_var(bds)
@@ -255,6 +257,9 @@ def train(config,wandb_logging=True):
                                             bds=child_bds,config=config,mode=es_update_mode,novelties=child_novelties)
         grad = torch.from_numpy(np.array(grad))
         updated_params,optimizer_state = jax_es_update.do_gradient_step(current_params,grad,optimizer_state,config)
+        
+        # Only add it to the archive, once we calculated novelties and stuff.
+        b_archive.append(mean_eval_bd)
         
         ########################
         ## LOGGING / PLOTTING ##

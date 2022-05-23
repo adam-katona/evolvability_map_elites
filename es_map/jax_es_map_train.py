@@ -27,6 +27,8 @@ from es_map import map_elite_utils
 from es_map import behavior_map
 from es_map import nd_sort
 
+from es_map import custom_configs
+
 
 # One of the contribution of evolvability map elites
 # is to actually select for evolvability or innovation and even excpected fitness
@@ -52,7 +54,7 @@ from es_map import nd_sort
 #                on selection, we can select from each map
 # - nd_sorted map -> multiple metric, each cell in map contains a nondominated front of elites
 #                    on insertion, we sort elites and the candidate, and keep the first n
-#                    on selection, we select from the front.
+#                    on selection, we do one big nd sort of the whole map
 
 
 
@@ -62,9 +64,7 @@ from es_map import nd_sort
 
 
 
-# One detail is that every time we compare innovcation, we need to recalculate it for the current archive.
-# NOTE, maybe this will be a bottleneck if the map is quite full.
-# it is already computed on the gpu, but maybe it can be even faster if we do it all in once, without the for.
+# One detail is that every time we compare innovation, we need to recalculate it for the current archive.
 def update_innovation_of_map(non_empty_cells,config,b_archive_array,batch_calculate_novelty_fn):
 
     if config["BMAP_type_and_metrics"]["type"] == "single_map":
@@ -77,7 +77,7 @@ def update_innovation_of_map(non_empty_cells,config,b_archive_array,batch_calcul
         individuals = [cell["elite"] for cell in non_empty_cells]
         
     for individual in individuals:
-        child_bds = jnp.array(individual["child_eval"]["bds"])
+        child_bds = jnp.array(individual["child_eval"]["rollout_results"]["bds"][:config["ES_popsize"]])
         child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
         innovation = jnp.mean(child_novelties).item() # innovation is excpected novelty
         individual["innovation"] = innovation
@@ -106,6 +106,7 @@ def select_parent_from_multi_map(b_map,config,b_archive_array,batch_calculate_no
     # Reason 1: we want to benefit from synergies, maybe high fitness will lead to high evolvability, etc...
     # Reason 2: If we dont have an update mode for it, we will never select it, so it is pointless to have that map...
     
+    # We select a metric randomly, it is complately independent from the es_update_mode we use.
     selected_metric = np.random.choice(config["BMAP_type_and_metrics"]["metrics"])
     non_empty_cells = b_map.get_non_empty_cells(selected_metric)
     
@@ -138,7 +139,7 @@ def select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculat
         # Let us do that
         # The complexity of sorting is n^2, so we might have problem for large maps.
         # Especially, because each cell can have multiple elites.
-        # If we are below few 10K we are ok, our biggest map is 1296, so we are OK.
+        # If we are below few 10K we are ok, our biggest map is 1296, so we are very OK.
         all_elite_objectives = []
         all_elite_indicies = []
         for cell_i,cell in enumerate(non_empty_cells):
@@ -170,8 +171,8 @@ def select_parent_from_nd_sorted_map(b_map,config,b_archive_array,batch_calculat
                                                 agressiveness=config["ES_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS"])
         
         selected_indicies = all_elite_indicies[sorted_indicies[selected_index]]
-        selected_cell = non_empty_cells[selected_indicies[0]]
-        selected_individual = selected_cell["elites"][selected_indicies[1]]
+        cell_i,elite_i = selected_indicies
+        selected_individual = non_empty_cells[cell_i]["elites"][elite_i]
         
     return selected_individual
     
@@ -197,6 +198,9 @@ def train(config,wandb_logging=True):
     if type(config) != type(dict()):
         config = config.as_dict()
     
+    if "config_index" in config:
+        config = custom_configs.get_config_from_index(config,config["config_index"])
+    
     from es_map import jax_evaluate
     bd_descriptor = brax_envs.env_to_bd_descriptor(config["env_name"],config["env_mode"])
     config["map_elites_grid_description"] = bd_descriptor
@@ -219,6 +223,9 @@ def train(config,wandb_logging=True):
     with open(run_checkpoint_path+'/config.json', 'w') as file:
         json.dump(config, file,indent=4)
         
+    population_size = config["ES_popsize"]
+    get_next_individual_id = map_elite_utils.create_id_generator()
+        
     # setup env and model
     env = jax_evaluate.create_env(config["env_name"],config["env_mode"],config["ES_popsize"],
                                   config["ES_CENTRAL_NUM_EVALUATIONS"],config["episode_max_length"])
@@ -238,12 +245,24 @@ def train(config,wandb_logging=True):
     # i dont care about it being slow, or needing copy to cpu
     first_parent_params = np.array(vec)
     first_parent = {
+        "ID" : get_next_individual_id(),
+        "parent_ID" : None,
+        "generation_created" : 0,
         "params" : first_parent_params,
         "child_eval" : None,
     }
     
     b_archive = [] # we append bcs, and do: b_archive_array = jnp.stack(b_archive)   
-    b_map = behavior_map.create_b_map_grid(config)
+    b_archive_array = None
+    b_map_evolver = behavior_map.create_b_map_grid(config)
+    
+    # create a b_map for performance only. We will try to insert every individual into this map as well.
+    # for this create a config which which we use when calling functions which try to insert individuals into it.
+    perf_config = copy.deepcopy(config) 
+    perf_config["BMAP_type_and_metrics"]["type"] = "single_map"
+    perf_config["BMAP_type_and_metrics"]["metrics"] = ["eval_fitness"]
+    b_map_performance = behavior_map.create_b_map_grid(perf_config)
+    
 
     observation_stats = {                  # this is a single obs stats to keep track of during the whole experiment. 
         "sum" : np.zeros(env.observation_space.shape[1]),       # This is always expanded, and always used to calculate the current mean and std
@@ -252,11 +271,15 @@ def train(config,wandb_logging=True):
     }
 
     generation_number = 0
-    evaluations_so_far = 0
-    best_fitness_so_far = 0
-    best_model_so_far = None
-    best_evolvability_so_far = 0
-    obs_stats_history = []
+    
+    best_normal_fitness = -99999999999.0
+    best_control_cost = -99999999999.0
+    best_distance_walked = -99999999999.0
+    
+    # phylogeny_data format: (parent_id,child_id,generation_number)
+    # phylogeny_data = []  # Not doing it, maybe in the future
+    
+    all_step_logs = []
 
     while True:
         if generation_number >= config["ES_NUM_GENERATIONS"]:
@@ -264,13 +287,12 @@ def train(config,wandb_logging=True):
             break
 
 
-
         ##############################################
         ## Populate the map with random individuals ##
         ##############################################
         
+        # Only on first iteration
         # Let us skip this step, and start with a single random individual
-        
         
         
         ######################################
@@ -282,59 +304,224 @@ def train(config,wandb_logging=True):
         
         # Choose a parent
         if generation_number == 0:
-            current_individual = first_parent
+            current_idividual = first_parent
         else:
-            if config["BMAP_type_and_metrics"]["type"] == "single_map":
-                pass
-            elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
-                # how do we 
-                pass
-            elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
-                pass
+            current_idividual = select_parent_from_map(b_map_evolver,config,b_archive_array,batch_calculate_novelty_fn)
         
         
         ##################
         ## UPDATE STEPS ##
         ##################
+        optimizer_state = None # Whenever a new parent is selected, we reset optimizer state
         for update_step_i in range(config["ES_STEPS_UNTIL_NEW_PARENT_SELECTION"]):
         
             #######################
             ## EVALUATE CHILDREN ##
             #######################
             
+            # Only needed if we dont have cached evaluations already (first parent)
+            if current_idividual["child_eval"] is None:
+                key, key_create_pop = jax.random.split(key, 2)
+                all_params,perturbations = jax_es_update.jax_es_create_population(
+                                                                        current_idividual["params"],key_create_pop,
+                                                                        popsize=config["ES_popsize"],
+                                                                        eval_batch_size=config["ES_CENTRAL_NUM_EVALUATIONS"],
+                                                                        sigma=config["ES_sigma"])
+                all_model_params = batch_vec_to_params(all_params,shapes,indicies)
+                
+                rollout_results,new_obs_stats = jax_evaluate.rollout_episodes(env,all_model_params,observation_stats,config,
+                                                                                    batch_model_apply_fn)
+                observation_stats = new_obs_stats 
+                mean_eval_bd = jnp.mean(rollout_results["bds"][population_size:],axis=0) # for the first parent, add it to the archive
+                b_archive.append(mean_eval_bd)
+                
+                current_idividual["child_eval"] = {
+                    "rollout_results" : rollout_results,
+                    "key_create_pop" : key_create_pop,
+                }
+            else:
+                # recreate perturbations from random seed
+                perturbations = jax_es_update.jax_create_perturbations(key=current_idividual["child_eval"]["key_create_pop"],
+                                                                       popsize=config["ES_popsize"],
+                                                                       params_shape=current_idividual["params"].shape)
             
             ##################
             ## DO ES UPDATE ##
-            ##################
+            ##################       
+            child_bds = rollout_results["bds"][:population_size]
+            child_fitness = rollout_results["fitnesses"][:population_size]
             
-            
-            ############################
-            ## EVALUATE UPDATED THETA ##
-            ############################
+            b_archive_array = jnp.stack(b_archive)
+            child_novelties = batch_calculate_novelty_fn(child_bds,b_archive_array)
+
+        
+            grad = jax_es_update.jax_calculate_gradient(perturbations=perturbations,
+                                                child_fitness=child_fitness,
+                                                bds=child_bds,config=config,
+                                                mode=es_update_mode,novelties=child_novelties)
+            grad = torch.from_numpy(np.array(grad))
+            updated_params,optimizer_state = jax_es_update.do_gradient_step(current_idividual["params"],grad,optimizer_state,config)
             
             ##################################
             ## EVALUATE CHILDREN OF UPDATED ##
             ##################################
+            key, key_create_pop = jax.random.split(key, 2)
+            all_params,perturbations = jax_es_update.jax_es_create_population(
+                                                                    updated_params,key_create_pop,
+                                                                    popsize=config["ES_popsize"],
+                                                                    eval_batch_size=config["ES_CENTRAL_NUM_EVALUATIONS"],
+                                                                    sigma=config["ES_sigma"])
+            all_model_params = batch_vec_to_params(all_params,shapes,indicies)
             
+            rollout_results,new_obs_stats = jax_evaluate.rollout_episodes(env,all_model_params,observation_stats,config,
+                                                                                batch_model_apply_fn)
+            observation_stats = new_obs_stats 
             
-            #########################
-            ## INSERT INTO ARCHIVE ##
-            #########################
+            fitness = rollout_results["fitnesses"]
+            bds = rollout_results["bds"]
             
+            child_bds = bds[:population_size]
+            eval_bds = bds[population_size:]
+            child_fitness = fitness[:population_size]
+            eval_fitness = fitness[population_size:]
+            child_novelties = batch_calculate_novelty_fn(rollout_results["bds"],b_archive_array)
+            
+            mean_eval_bd = jnp.mean(eval_bds,axis=0)
+            mean_eval_fitness = jnp.mean(eval_fitness).item()
+            
+            excpected_fitness = jnp.mean(child_fitness).item()
+            innovation = jnp.mean(child_novelties).item() # innovation is excpected novelty
+            evo_var = jax_evaluate.calculate_evo_var(bds)
+            evo_ent = jax_evaluate.calculate_evo_ent(bds,config)
+        
+            updated_individual = {
+                
+                "ID" : get_next_individual_id(),
+                "parent_ID" : current_idividual["ID"],
+                "generation_created" : generation_number,
+                
+                "params" : updated_params,
+                "child_eval" : {
+                    "rollout_results" : rollout_results,
+                    "key_create_pop" : key_create_pop,
+                },
+                "eval_fitness" : mean_eval_fitness,
+                "eval_bc" : mean_eval_bd,
+                    
+                "excpected_fitness" : excpected_fitness,
+                "innovation" : innovation,
+                "evo_var" : evo_var,
+                "evo_ent" : evo_ent,
+            }
+            
+            ##############################
+            ## TRY INSERT INTO ARCHIVES ##
+            ##############################
+            
+            # Try to insert into both b_map_evolver and b_map_performance
+            map_elite_utils.try_insert_individual_in_map(updated_individual,b_map_evolver,b_archive=b_archive_array,
+                                                         config=config,batch_calculate_novelty_fn=batch_calculate_novelty_fn)
+            map_elite_utils.try_insert_individual_in_map(updated_individual,b_map_performance,b_archive=None,
+                                                         config=perf_config,batch_calculate_novelty_fn=batch_calculate_novelty_fn)
+            
+            # Only add the archive after i calculated all the novelties and stuff for this generation
+            b_archive.append(mean_eval_bd)
             
             ################################
             ## PREPARE FOR NEXT ITERATION ##
             ################################
-            
+            current_individual = updated_individual
             
             ########################
             ## EVERY STEP LOGGING ##
             ########################
             
+            # stats from current individual
+            normal_fitness = rollout_results["normal_fitness"]
+            distance_walked = rollout_results["distance_walked"]
+            control_cost = rollout_results["control_cost_fitness"]
+            
+            mean_dist = jnp.mean(distance_walked[:population_size])
+            max_dist = jnp.max(distance_walked[:population_size])
+            eval_mean_dist = jnp.mean(distance_walked[population_size:])
+            
+            mean_normal_fitness = jnp.mean(normal_fitness[:population_size])
+            eval_normal_fitness = jnp.mean(normal_fitness[population_size:])
+            
+            mean_control_cost = jnp.mean(control_cost[:population_size])
+            max_control_cost = jnp.max(control_cost[:population_size])
+            eval_control_cost = jnp.mean(control_cost[population_size:])
+            
+            current_individual["eval_mean_dist"] = eval_mean_dist
+            current_individual["eval_normal_fitness"] = eval_normal_fitness
+            current_individual["eval_control_cost"] = eval_control_cost
+            
+            if eval_normal_fitness > best_normal_fitness:
+                best_normal_fitness = eval_normal_fitness
+            if eval_control_cost > best_control_cost:
+                best_control_cost = eval_control_cost
+            if eval_mean_dist > best_distance_walked:
+                best_distance_walked = eval_mean_dist
+                
+            print(generation_number,eval_normal_fitness,eval_mean_dist,max_dist)
+            
+            # get stats from performance map
+            perf_non_empty_cells = b_map_performance.get_non_empty_cells()  # for logging use the fitness map
+            perf_b_map_size = b_map_performance.data.size
+            perf_nonempty_ratio = len(perf_non_empty_cells) / float(perf_b_map_size)
+            perf_qd_score = qd_score = np.sum([cell["elite"]["eval_fitness"] for cell in perf_non_empty_cells])
+            perf_qd_normal_fitness = qd_score = np.sum([cell["elite"]["eval_normal_fitness"] for cell in perf_non_empty_cells])
+            perf_qd_control_cost = qd_score = np.sum([cell["elite"]["eval_control_cost"] for cell in perf_non_empty_cells])
+            perf_qd_mean_dist = qd_score = np.sum([cell["elite"]["eval_mean_dist"] for cell in perf_non_empty_cells])
+            
+            # get stats from evolvbility map
+            # I dont know if i am particularly interseted in this stuff...
+            # We can do the final analysis after the run anyway, just not the learning curves.
+            
+            step_logs = {
+                "generation_number" : generation_number,
+                "evaluations_so_far" : generation_number*config["ES_popsize"],
+
+                # Log the 3 kind of fitness
+                "mean_normal_fitness" : mean_normal_fitness,
+                "eval_normal_fitness" : eval_normal_fitness,
+                
+                "mean_control_cost" : mean_control_cost,
+                "max_control_cost" : max_control_cost,
+                "eval_control_cost" : eval_control_cost,
+                
+                "mean_dist" : mean_dist,
+                "max_dist" : max_dist,
+                "eval_mean_dist" : eval_mean_dist,
+
+                # we dont log the bd, because it is multi dimensinal.
+                # but we log entropy, variance and innovation    
+                "excpected_fitness" : excpected_fitness,        
+                "innovation" : innovation,
+                "evo_var" : evo_var,
+                "evo_ent" : evo_ent,
+            
+                "perf_nonempty_ratio" : perf_nonempty_ratio,
+                "perf_qd_score" : perf_qd_score,
+                "perf_qd_normal_fitness" : perf_qd_normal_fitness,
+                "perf_qd_control_cost" : perf_qd_control_cost,
+                "perf_qd_mean_dist" : perf_qd_mean_dist,
+                
+            }
+            if wandb_logging is True:   
+                wandb.log(step_logs)   
+            
+            all_step_logs.append(step_logs)
+            
             ####################
             ## N STEP LOGGING ##
             ####################
-            
+
+            # No N step logging, but we can print some stuff
+            #if generation_number % config["PLOT_FREQUENCY"] == 10:
+            #    print(generation_number)
+            #    for k,v in step_logs.items():
+            #        print(k,v)
             
             ###################
             ## CHECKPOINTING ##
@@ -344,9 +531,17 @@ def train(config,wandb_logging=True):
             generation_number += 1
             
             
-        ################
-        ## FINAL SAVE ##
-        ################
+    ################
+    ## FINAL SAVE ##
+    ################
+    np.save(run_checkpoint_path+"/b_map_evolver.npy",b_map_evolver.data,allow_pickle=True)
+    np.save(run_checkpoint_path+"/b_map_performance.npy",b_map_performance.data,allow_pickle=True)
+    b_archive_array = np.stack(b_archive)  
+    np.save(run_checkpoint_path+"/b_archive.npy",b_archive_array)
+    with open(run_checkpoint_path+'/all_step_logs.pickle', 'wb') as handle:
+        pickle.dump(all_step_logs, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    final_rollout_arrays = {name : np.array(arr) for name,arr in rollout_results.items()}
+    np.savez(run_checkpoint_path+"/final_rollout_arrays.npz",final_rollout_arrays)
 
 
 
@@ -354,52 +549,6 @@ def train(config,wandb_logging=True):
 
 
 
-
-
-
-
-
-
-
-
-        # NOTE we skip initial random population, we use a single individual as the first parent
-        
-        ######################################
-        ## PARENT AND UPDATE MODE SELECTION ##
-        ######################################
-        # Choose an update mode
-        es_update_mode = np.random.choice(config["ES_UPDATES_MODES_TO_USE"])
-        if generation_number == 0:
-            current_individual = first_parent
-        else:
-            if config["BMAP_type_and_metrics"]["type"] == "single_map":
-                # choose parent
-                non_empty_cells = b_map.get_non_empty_cells()
-                
-                if config["ES_PARENT_SELECTION_MODE"] == "uniform":
-                    parent_cell = np.random.choice(non_empty_cells) 
-                elif config["ES_PARENT_SELECTION_MODE"] == "rank_proportional":
-                    # rank proportional means we rank based on the score
-                    # What this score should be? Fitness?
-                    # Do we have versions where we decide insertion based on evolvability or novelty when we have single map?
-                    
-                    sorted_cells = sorted(non_empty_cells,key=lambda x : x["elite"]["eval_fitness"])                
-                    selected_index = map_elite_utils.rank_based_selection(num_parent_candidates=len(sorted_cells),
-                                                            num_children=None, # only want a single parent
-                                                            agressiveness=config["ES_RANK_PROPORTIONAL_SELECTION_AGRESSIVENESS"])
-                    parent_cell = sorted_cells[selected_index]
-                current_individual = parent_cell["elite"]
-            
-            elif config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
-                pass
-                
-            
-            elif config["BMAP_type_and_metrics"]["type"] == "multi_map":
-                pass
-
-
-
-            # NOTE, rewrite loop with new rollout function
 
 
 

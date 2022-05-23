@@ -5,7 +5,7 @@ import wandb
 
 from es_map import jax_evaluate
 from es_map.my_brax_envs import brax_envs
-
+from es_map import custom_configs
 
 def set_up_dask_client(n_workers=50):
     #import shutil
@@ -104,19 +104,29 @@ def setup_wandb(config_defaults,project_name):
     return config
 
 
-
+# TODO, set it based on what kind of env
+# def set_entropy_bandwidth()
     
 def setup_wandb_jax(config_defaults,project_name):
     
     import types
     if isinstance(wandb.config, types.FunctionType):
         # wandb config is a function, which means wandb is not inited, we are not in a sweep
+        if "config_index" in config_defaults:
+            # we are using custom config
+            config_defaults = custom_configs.get_config_from_index(config_defaults,config_defaults["config_index"])
+        
         bd_descriptor = brax_envs.env_to_bd_descriptor(config_defaults["env_name"],config_defaults["env_mode"])
         config_defaults["map_elites_grid_description"] = bd_descriptor
     else:
+        config_dict = wandb.config.as_dict()
+        if "config_index" in config_dict:
+            # we are using custom config
+            config_defaults = custom_configs.get_config_from_index(config_defaults,config_dict["config_index"])
+            
         bd_descriptor = brax_envs.env_to_bd_descriptor(wandb.config["env_name"],wandb.config["env_mode"])
         config_defaults["map_elites_grid_description"] = bd_descriptor
-    
+        
     
     wandb.init(project=project_name, entity="adam_katona",config=config_defaults,dir="/scratch/ak1774/runs") # this is a bit vauge how this happens but default will not set values already set by a sweep
     config = wandb.config

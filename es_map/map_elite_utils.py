@@ -258,6 +258,10 @@ def ga_select_parents_multi_parent_mode(non_empty_cells,config):
     return parent_param_list
     
     
+def recalculate_innovation(individual,b_archive,batch_calculate_novelty_fn,config):
+    novelties = batch_calculate_novelty_fn(individual["child_eval"]["rollout_results"]["bds"][:config["ES_popsize"]],b_archive)
+    innovation = jnp.mean(novelties).item()
+    individual["innovation"] = innovation    
 
 def try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,config,batch_calculate_novelty_fn):
     needs_adding = False
@@ -265,15 +269,8 @@ def try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,conf
         needs_adding = True
     else:
         if metric == "innovation": # recalculate innovation
-            if b_map.data[map_coords]["elite"]["child_eval"] is not None:
-                if batch_calculate_novelty_fn is None:
-                    b_map.data[map_coords]["elite"][metric] = calculate_innovativeness(b_map.data[map_coords]["elite"]["child_eval"],b_archive,config)
-                else:
-                     novelties = batch_calculate_novelty_fn(b_map.data[map_coords]["elite"]["child_eval"]["bds"],b_archive)
-                     innovation = jnp.mean(novelties).item()
-                     b_map.data[map_coords]["elite"]["innovation"] = innovation
-            else:
-                raise "Error: what is this doing in an innovation map if no innovation is calculated for it??"        
+            recalculate_innovation(b_map.data[map_coords]["elite"],b_archive,batch_calculate_novelty_fn,config)
+            
         if b_map.data[map_coords]["elite"][metric] < new_individual[metric]:
             needs_adding = True
         
@@ -284,9 +281,7 @@ def try_insert_into_coords(new_individual,map_coords,metric,b_map,b_archive,conf
     return False
     
 
-def try_insert_individual_in_map(new_individual,b_map,b_archive,config,batch_calculate_novelty_fn=False):
-    # batch_calculate_novelty_fn is only used with jax, if it is none, we use the normal cpu version
-    
+def try_insert_individual_in_map(new_individual,b_map,b_archive,config,batch_calculate_novelty_fn=None):
     # if multi map, try inserting it to each map
     # if nd sorted, but we only have fitness, assume evolvability and innovation are 0, and try to insert it that way
     # b_archive is needed to recalculate novelty of the elites, to see if they decreased since we last calculated it
@@ -328,19 +323,12 @@ def try_insert_individual_in_map(new_individual,b_map,b_archive,config,batch_cal
             current_elites = b_map.data[map_coords]["elites"]
             if "innovation" in metrics: # make sure innovation is up to date
                 for elite in current_elites:
-                    if elite["child_eval"] is not None:
-                        
-                        if batch_calculate_novelty_fn is None:
-                            updated_innovation = calculate_innovativeness(elite["child_eval"],b_archive,config)
-                        else:
-                            updated_novelties = batch_calculate_novelty_fn(elite["child_eval"]["bds"],b_archive)
-                            updated_innovation = jnp.mean(updated_novelties).item()   
-                        elite["innovation"] = updated_innovation
+                    recalculate_innovation(elite,b_archive,batch_calculate_novelty_fn,config)
                         
             all_contestants = current_elites
             all_contestants.append(new_individual)
             new_id = len(all_contestants)
-               
+
             first_front_sorted_indicies = get_nd_sorted_first_front(all_contestants,metrics)
             # take the first n elements (or as many as there is)
             sorted_contestants = [all_contestants[idx] for idx in first_front_sorted_indicies]

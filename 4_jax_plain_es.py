@@ -9,7 +9,7 @@ if __name__ == '__main__':
     sweep_conf = {
             "name" : "jax_simple_es",
             "program" : "/home/userfs/a/ak1774/workspace/evolvability_map_elites/evolvability_map_elites/jax_run_es.py",
-            "metric": {"name": "eval_fitness", "goal": "maximize"},
+            "metric": {"name": "max_dist", "goal": "maximize"},
             "method": "grid",
             "parameters": {
                 "RUN_ID" : {

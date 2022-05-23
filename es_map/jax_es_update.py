@@ -6,6 +6,14 @@ import torch
 
 from es_map import nd_sort
 
+def jax_create_perturbations(key,popsize,params_shape):
+    half_popsize = int(popsize/2)
+    if 2*half_popsize != popsize:
+        raise "error, popsize must be divisible by 2"
+    perturbations = jax.random.normal(key,[half_popsize, params_shape[0]])
+    perturbations = jnp.concatenate([perturbations, -1 * perturbations])
+    return perturbations
+
 def jax_es_create_population(parent_params,key,popsize,eval_batch_size,sigma):
     
     half_popsize = int(popsize/2)
