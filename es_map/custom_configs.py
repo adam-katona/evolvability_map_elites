@@ -61,6 +61,43 @@ config_list = {
     },
 }
 
+# TODO, for future runs
+# Add combined updates
+# We have 8 configs where there are multiple update modes
+# We could also do a test only with one type of map
+# Eg for nondominated we do the combined, alternating or even combined + alternating...
+# Let us do that.
+
+combined_config_list = {
+    "E-ME-f__explore-evolvability-exploit" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["excpected_fitness"]},
+    },
+    "E-ME-f__explore-evolvability-exploit_C" : {
+        "ES_UPDATES_MODES_TO_USE" : ["quality_evo_ent_innovation"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["excpected_fitness"]},
+    },
+    "E-ME-f__explore-evolvability-exploit_C+" : {
+        "ES_UPDATES_MODES_TO_USE" : ["quality_evo_ent_innovation","fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["excpected_fitness"]},
+    },
+    
+    "ND-ME-fei__explore-evolvability-exploit" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "nd_sorted_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "ND-ME-fei__explore-evolvability-exploit_C" : {
+        "ES_UPDATES_MODES_TO_USE" : ["quality_evo_ent_innovation"],
+        "BMAP_type_and_metrics" : {"type" : "nd_sorted_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "ND-ME-fei__explore-evolvability-exploit_C+" : {
+        "ES_UPDATES_MODES_TO_USE" : ["quality_evo_ent_innovation","fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "nd_sorted_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+}
+
+
+
 
 # The configs here is kind of additive testing, adding one feature, and see if it helps.
 # We can also do an ablation study, take the complate system, and starte removing comonents.
@@ -71,11 +108,23 @@ config_list = {
 
 
 
-config_index_to_names = {i:name for i,name in enumerate(config_list)}
 
 def get_config_from_index(default_config,index):
-    config_name = config_index_to_names[index]
-    custom_config = config_list[config_name]
+    
+    if "config_list_name" in default_config:
+        if default_config["config_list_name"] == "default_list":
+            selected_config_dict = config_list
+        elif default_config["config_list_name"] == "combined_update_list":
+            selected_config_dict = combined_config_list
+        else:
+            raise "Unknown config_list_name"
+    else:
+        selected_config_dict = config_list
+        
+        
+    config_i_to_name = {i:name for i,name in enumerate(selected_config_dict)}
+    config_name = config_i_to_name[index]
+    custom_config = selected_config_dict[config_name]
 
     config = copy.deepcopy(default_config)
     config.update(custom_config)

@@ -248,13 +248,17 @@ def train(config,wandb_logging=True):
         "ID" : get_next_individual_id(),
         "parent_ID" : None,
         "generation_created" : 0,
+        "lineage_length_before_individual" : 0,
         "params" : first_parent_params,
         "child_eval" : None,
     }
     
     b_archive = [] # we append bcs, and do: b_archive_array = jnp.stack(b_archive)   
     b_archive_array = None
-    b_map_evolver = behavior_map.create_b_map_grid(config)
+    evolver_config = copy.deepcopy(config) 
+    evolver_bd_descriptor = brax_envs.env_to_evolver_bd_descriptor(evolver_config["env_name"],evolver_config["env_mode"])
+    evolver_config["map_elites_grid_description"] = evolver_bd_descriptor
+    b_map_evolver = behavior_map.create_b_map_grid(evolver_config)
     
     # create a b_map for performance only. We will try to insert every individual into this map as well.
     # for this create a config which which we use when calling functions which try to insert individuals into it.
@@ -280,6 +284,22 @@ def train(config,wandb_logging=True):
     # phylogeny_data = []  # Not doing it, maybe in the future
     
     all_step_logs = []
+    
+    # lineage data is stored as a list:
+    # {
+    #  "ID" :  
+    #  "parent_ID"
+    #  "generation_created"  
+    #  "lineage_length_before_individual" 
+    # }
+    # I store the lineage data because i want to answer questions like:
+    # How long is the longest lineage (average)
+    # How many times a parent is selected (what is the largest / average forking)
+    # Maybe i can even plot the whole thing (would be fun)
+    # What else? Any other data needs saving?
+    # I save the lineage data separatly because i want to remember the whole thing, not just the elites in the map
+    lineage_data = []
+    
 
     while True:
         if generation_number >= config["ES_NUM_GENERATIONS"]:
@@ -306,7 +326,7 @@ def train(config,wandb_logging=True):
         if generation_number == 0:
             current_idividual = first_parent
         else:
-            current_idividual = select_parent_from_map(b_map_evolver,config,b_archive_array,batch_calculate_novelty_fn)
+            current_idividual = select_parent_from_map(b_map_evolver,evolver_config,b_archive_array,batch_calculate_novelty_fn)
         
         
         ##################
@@ -399,6 +419,7 @@ def train(config,wandb_logging=True):
                 "ID" : get_next_individual_id(),
                 "parent_ID" : current_idividual["ID"],
                 "generation_created" : generation_number,
+                "lineage_length_before_individual" : current_idividual["lineage_length_before_individual"]+1,
                 
                 "params" : updated_params,
                 "child_eval" : {
@@ -414,13 +435,20 @@ def train(config,wandb_logging=True):
                 "evo_ent" : evo_ent,
             }
             
+            lineage_data.append({
+                "ID" : updated_individual["ID"],
+                "parent_ID" : updated_individual["parent_ID"],
+                "generation_created" : updated_individual["generation_created"],
+                "lineage_length_before_individual" : updated_individual["lineage_length_before_individual"],
+            })
+            
             ##############################
             ## TRY INSERT INTO ARCHIVES ##
             ##############################
             
             # Try to insert into both b_map_evolver and b_map_performance
             map_elite_utils.try_insert_individual_in_map(updated_individual,b_map_evolver,b_archive=b_archive_array,
-                                                         config=config,batch_calculate_novelty_fn=batch_calculate_novelty_fn)
+                                                         config=evolver_config,batch_calculate_novelty_fn=batch_calculate_novelty_fn)
             map_elite_utils.try_insert_individual_in_map(updated_individual,b_map_performance,b_archive=None,
                                                          config=perf_config,batch_calculate_novelty_fn=batch_calculate_novelty_fn)
             
@@ -540,8 +568,12 @@ def train(config,wandb_logging=True):
     np.save(run_checkpoint_path+"/b_archive.npy",b_archive_array)
     with open(run_checkpoint_path+'/all_step_logs.pickle', 'wb') as handle:
         pickle.dump(all_step_logs, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open(run_checkpoint_path+'/lineage_data.pickle', 'wb') as handle:
+        pickle.dump(lineage_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
     final_rollout_arrays = {name : np.array(arr) for name,arr in rollout_results.items()}
     np.savez(run_checkpoint_path+"/final_rollout_arrays.npz",final_rollout_arrays)
+
 
 
 

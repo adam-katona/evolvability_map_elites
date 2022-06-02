@@ -68,15 +68,15 @@ if __name__ == '__main__':
             "method": "grid",
             "parameters": {
                 "RUN_ID" : {
-                    "values" : [0,1,2,3,4]
+                    "values" : [0,1]
                 },
                 "env_name" : {
                     "values" : [
                         "ant",
                         "humanoid", 
-                        "walker", 
-                        "hopper", 
-                        "halfcheetah",
+                        #"walker", 
+                        #"hopper", 
+                        #"halfcheetah",
                     ],
                 },
                 "env_mode" : {
@@ -84,7 +84,7 @@ if __name__ == '__main__':
                         "NORMAL_CONTACT",#      same fitness as the original env, bd is foot contacts
                         #"NORMAL_FINAL_POS",#    same fitness as the original env, bd is final pos
                         #"DISTANCE_CONTACT",#    fitness is distance, bd is foot contact
-                        "DISTANCE_FINAL_POS",#  fitness is distance, bd is final pos
+                        #"DISTANCE_FINAL_POS",#  fitness is distance, bd is final pos
                         "CONTROL_FINAL_POS",#   fitness is control cost only, bd is final pos  (for control we dont use foot contacts)
                         #"DIRECTIONAL_CONTACT",#
                     ],
@@ -101,6 +101,25 @@ if __name__ == '__main__':
     custom_config_list_sweep = {
         "config_index" : {
             "values" : list(range(len(custom_configs.config_list)))
+        },
+    }
+    custom_long_config_list_sweep = {
+        "config_index" : {
+            "values" : [1,3,7,8,10,11]
+        },
+        "config_list_name" : {
+            "values" : ["default_list"]
+        },
+        "ES_NUM_GENERATIONS" : {
+             "values" : [40000]
+        }
+    }
+    custom_combined_config_list_sweep = {
+        "config_index" : {
+            "values" : list(range(len(custom_configs.combined_config_list)))
+        },
+        "config_list_name" : {
+            "values" : ["combined_update_list"]
         },
     }
     
@@ -182,9 +201,13 @@ if __name__ == '__main__':
     custom_sweep_conf = copy.deepcopy(basic_sweep_conf)
     custom_sweep_conf["parameters"].update(custom_config_list_sweep)
     
+    custom_long_sweep_conf = copy.deepcopy(basic_sweep_conf)
+    custom_sweep_conf["parameters"].update(custom_long_config_list_sweep)
     
+    custom_combined_sweep_conf = copy.deepcopy(basic_sweep_conf)
+    custom_sweep_conf["parameters"].update(custom_combined_config_list_sweep)
     
     print("Starting SWEEP!!!")
-    sweep_id = wandb.sweep(custom_sweep_conf)
+    sweep_id = wandb.sweep(custom_long_sweep_conf)
     print("Sweep started!   Starting agent now...")
     

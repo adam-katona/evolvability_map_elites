@@ -378,6 +378,37 @@ def env_mode_interpret(env_mode):
     
     return fitness_mode,bd_mode
 
+
+def env_to_evolver_bd_descriptor(env_name,env_mode):
+    fitness_mode,bd_mode = env_mode_interpret(env_mode)
+    bd_descriptor = env_to_bd_descriptor(env_name,env_mode)
+    if env_name == "ant":
+        if bd_mode == "CONTACT":
+            bd_descriptor["grid_dims"] = [3,3,3,3],
+        elif bd_mode == "FINAL_POS":
+            bd_descriptor["grid_dims"] = [8,8]
+            
+    elif env_name == "humanoid":
+        if bd_mode == "CONTACT":
+            bd_descriptor["grid_dims"] = [8,8]
+        elif bd_mode == "FINAL_POS":
+            bd_descriptor["grid_dims"] = [8,8]
+    
+    
+    elif env_name == "walker" or env_name == "halfcheetah":
+        if bd_mode == "CONTACT":
+            bd_descriptor["grid_dims"] = [8,8]
+        elif bd_mode == "FINAL_POS":
+            bd_descriptor["grid_dims"] = [32]
+    elif env_name == "hopper":
+        if bd_mode == "CONTACT":
+            bd_descriptor["grid_dims"] = [32]
+        elif bd_mode == "FINAL_POS":
+            bd_descriptor["grid_dims"] = [32]
+    else:
+        raise "unknown env name"
+    return bd_descriptor
+
 def env_to_bd_descriptor(env_name,env_mode):
     fitness_mode,bd_mode = env_mode_interpret(env_mode)
     if env_name == "ant":
