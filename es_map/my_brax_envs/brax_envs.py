@@ -384,7 +384,7 @@ def env_to_evolver_bd_descriptor(env_name,env_mode):
     bd_descriptor = env_to_bd_descriptor(env_name,env_mode)
     if env_name == "ant":
         if bd_mode == "CONTACT":
-            bd_descriptor["grid_dims"] = [3,3,3,3],
+            bd_descriptor["grid_dims"] = [3,3,3,3]
         elif bd_mode == "FINAL_POS":
             bd_descriptor["grid_dims"] = [8,8]
             

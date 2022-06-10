@@ -61,7 +61,50 @@ from es_map import custom_configs
 
 
 
-
+def calculate_lineage_stats(lineage_data):
+    child_dict = {}
+    for data in lineage_data:
+        parent_ID = data["parent_ID"]
+        if parent_ID in child_dict:
+            child_dict[parent_ID].append(data)
+        else:
+            child_dict[parent_ID] = [data]  
+    
+    number_of_child = [len(children) for parent_id,children in child_dict.items()]
+    lineage_lengths = [data["lineage_length_before_individual"] for data in lineage_data]
+    
+    return {
+        "mean_num_child" : np.mean(number_of_child),
+        "max_num_child" : np.max(number_of_child),
+        "mean_lineage_length" : np.mean(lineage_lengths),
+        "max_lineage_length" : np.max(lineage_lengths),
+    }
+    
+def calculate_evolvability_diversity(b_map_evolver,evolver_config,evolvability_type):
+    
+    # we need to get the best evolvability in each non empty cell, and sum them
+    # If it is a single map, we just grab the evolvability
+    # If it is nd sorted map, we get the highest evolvability from the nd front
+    # If it is multimap, we get the highest evolvability out of the each metric (we get this, even if evolvavility is not a metric used)
+    
+    if evolver_config["BMAP_type_and_metrics"]["type"] == "single_map":
+        non_empty_cells = b_map_evolver.get_non_empty_cells()
+        return np.sum([cell["elite"][evolvability_type] for cell in non_empty_cells])
+        
+    elif evolver_config["BMAP_type_and_metrics"]["type"] == "nd_sorted_map":
+        non_empty_cells = b_map_evolver.get_non_empty_cells()
+        evolvabilities = []
+        for cell in non_empty_cells:
+            cell_evolvabilities = [elite[evolvability_type] for elite in cell["elites"]]
+            evolvabilities.append(np.max(cell_evolvabilities))
+        return np.sum(evolvabilities)
+        
+    elif evolver_config["BMAP_type_and_metrics"]["type"] == "multi_map":
+        return b_map_evolver.get_ed_score(evolvability_type)
+        
+    else:
+        raise "Unknown bmap type in evolvability diversity calculation"
+    
 
 
 # One detail is that every time we compare innovation, we need to recalculate it for the current archive.
@@ -276,9 +319,22 @@ def train(config,wandb_logging=True):
 
     generation_number = 0
     
-    best_normal_fitness = -99999999999.0
-    best_control_cost = -99999999999.0
-    best_distance_walked = -99999999999.0
+    best_ever_eval_normal_fitness = -99999999999.0
+    best_ever_eval_control_cost = -99999999999.0
+    best_ever_eval_distance_walked = -99999999999.0
+    
+    best_ever_child_mean_normal_fitness = -99999999999.0
+    best_ever_child_mean_control_cost = -99999999999.0
+    best_ever_child_mean_distance_walked = -99999999999.0
+    
+    best_ever_child_normal_fitness = -99999999999.0
+    best_ever_child_control_cost = -99999999999.0
+    best_ever_child_distance_walked = -99999999999.0
+    
+    best_ever_evo_var = 0.0
+    best_ever_evo_ent = 0.0
+    
+    
     
     # phylogeny_data format: (parent_id,child_id,generation_number)
     # phylogeny_data = []  # Not doing it, maybe in the future
@@ -458,7 +514,7 @@ def train(config,wandb_logging=True):
             ################################
             ## PREPARE FOR NEXT ITERATION ##
             ################################
-            current_individual = updated_individual
+            current_idividual = updated_individual
             
             ########################
             ## EVERY STEP LOGGING ##
@@ -474,22 +530,43 @@ def train(config,wandb_logging=True):
             eval_mean_dist = jnp.mean(distance_walked[population_size:])
             
             mean_normal_fitness = jnp.mean(normal_fitness[:population_size])
+            max_normal_fitness = jnp.max(normal_fitness[:population_size])
             eval_normal_fitness = jnp.mean(normal_fitness[population_size:])
             
             mean_control_cost = jnp.mean(control_cost[:population_size])
             max_control_cost = jnp.max(control_cost[:population_size])
             eval_control_cost = jnp.mean(control_cost[population_size:])
             
-            current_individual["eval_mean_dist"] = eval_mean_dist
-            current_individual["eval_normal_fitness"] = eval_normal_fitness
-            current_individual["eval_control_cost"] = eval_control_cost
+            current_idividual["eval_mean_dist"] = eval_mean_dist
+            current_idividual["eval_normal_fitness"] = eval_normal_fitness
+            current_idividual["eval_control_cost"] = eval_control_cost
             
-            if eval_normal_fitness > best_normal_fitness:
-                best_normal_fitness = eval_normal_fitness
-            if eval_control_cost > best_control_cost:
-                best_control_cost = eval_control_cost
-            if eval_mean_dist > best_distance_walked:
-                best_distance_walked = eval_mean_dist
+            
+            if evo_var > best_ever_evo_var:
+                best_ever_evo_var = evo_var
+            if evo_ent > best_ever_evo_ent:
+                best_ever_evo_var = evo_ent
+            
+            if eval_normal_fitness > best_ever_eval_normal_fitness:
+                best_ever_eval_normal_fitness = eval_normal_fitness
+            if eval_control_cost > best_ever_eval_control_cost:
+                best_ever_eval_control_cost = eval_control_cost
+            if eval_mean_dist > best_ever_eval_distance_walked:
+                best_ever_eval_distance_walked = eval_mean_dist
+                
+            if  mean_normal_fitness > best_ever_child_mean_normal_fitness:
+                best_ever_child_mean_normal_fitness = mean_normal_fitness
+            if  mean_control_cost > best_ever_child_mean_control_cost:
+                best_ever_child_mean_control_cost = mean_control_cost
+            if  mean_dist > best_ever_child_mean_distance_walked:
+                best_ever_child_mean_distance_walked = mean_dist
+                
+            if  max_normal_fitness > best_ever_child_normal_fitness:
+                best_ever_child_normal_fitness = max_normal_fitness
+            if  max_control_cost > best_ever_child_control_cost:
+                best_ever_child_control_cost = max_control_cost
+            if  max_dist > best_ever_child_distance_walked:
+                best_ever_child_distance_walked = max_dist
                 
             print(generation_number,eval_normal_fitness,eval_mean_dist,max_dist)
             
@@ -497,18 +574,33 @@ def train(config,wandb_logging=True):
             perf_non_empty_cells = b_map_performance.get_non_empty_cells()  # for logging use the fitness map
             perf_b_map_size = b_map_performance.data.size
             perf_nonempty_ratio = len(perf_non_empty_cells) / float(perf_b_map_size)
-            perf_qd_score = qd_score = np.sum([cell["elite"]["eval_fitness"] for cell in perf_non_empty_cells])
-            perf_qd_normal_fitness = qd_score = np.sum([cell["elite"]["eval_normal_fitness"] for cell in perf_non_empty_cells])
-            perf_qd_control_cost = qd_score = np.sum([cell["elite"]["eval_control_cost"] for cell in perf_non_empty_cells])
-            perf_qd_mean_dist = qd_score = np.sum([cell["elite"]["eval_mean_dist"] for cell in perf_non_empty_cells])
+            perf_qd_score = np.sum([cell["elite"]["eval_fitness"] for cell in perf_non_empty_cells])
+            perf_qd_normal_fitness = np.sum([cell["elite"]["eval_normal_fitness"] for cell in perf_non_empty_cells])
+            perf_qd_control_cost = np.sum([cell["elite"]["eval_control_cost"] for cell in perf_non_empty_cells])
+            perf_qd_mean_dist = np.sum([cell["elite"]["eval_mean_dist"] for cell in perf_non_empty_cells])
+            
+            # ed stands for evolvability diversity 
+            evolver_ed_var_score = calculate_evolvability_diversity(b_map_evolver,evolver_config,"evo_var")
+            evolver_ed_ent_score = calculate_evolvability_diversity(b_map_evolver,evolver_config,"evo_ent")
+            
+            # Lineage data calculation
+            lineage_stats = calculate_lineage_stats(lineage_data)
             
             # get stats from evolvbility map
             # I dont know if i am particularly interseted in this stuff...
             # We can do the final analysis after the run anyway, just not the learning curves.
             
+            # IMPORTANT Metrics
+            # Best ever fitness DONE
+            # Best ever eval fitness DONE
+            # Best ever evolvability DONE
+            # QD DONE
+            # ED DONE
+            
+            
             step_logs = {
                 "generation_number" : generation_number,
-                "evaluations_so_far" : generation_number*config["ES_popsize"],
+                #"evaluations_so_far" : generation_number*config["ES_popsize"],
 
                 # Log the 3 kind of fitness
                 "mean_normal_fitness" : mean_normal_fitness,
@@ -529,12 +621,37 @@ def train(config,wandb_logging=True):
                 "evo_var" : evo_var,
                 "evo_ent" : evo_ent,
             
+                # best ever stats
+                "best_ever_eval_normal_fitness" : best_ever_eval_normal_fitness,
+                "best_ever_eval_control_cost" : best_ever_eval_control_cost,
+                "best_ever_eval_distance_walked" : best_ever_eval_distance_walked,
+                
+                "best_ever_child_mean_normal_fitness" : best_ever_child_mean_normal_fitness,
+                "best_ever_child_mean_control_cost" : best_ever_child_mean_control_cost,
+                "best_ever_child_mean_distance_walked" : best_ever_child_mean_distance_walked,
+                
+                "best_ever_child_normal_fitness" : best_ever_child_normal_fitness,
+                "best_ever_child_control_cost" : best_ever_child_control_cost,
+                "best_ever_child_distance_walked" : best_ever_child_distance_walked,
+                
+                "best_ever_evo_var" : best_ever_evo_var,
+                "best_ever_evo_ent" : best_ever_evo_ent,
+            
                 "perf_nonempty_ratio" : perf_nonempty_ratio,
                 "perf_qd_score" : perf_qd_score,
                 "perf_qd_normal_fitness" : perf_qd_normal_fitness,
                 "perf_qd_control_cost" : perf_qd_control_cost,
                 "perf_qd_mean_dist" : perf_qd_mean_dist,
                 
+                # evolver map stats
+                "evolver_ed_var_score" : evolver_ed_var_score,
+                "evolver_ed_ent_score" : evolver_ed_ent_score,
+                
+                # lineage stats
+                "lineage_mean_num_child" : lineage_stats["mean_num_child"],
+                "lineage_max_num_child" : lineage_stats["max_num_child"],
+                "mean_lineage_length" : lineage_stats["mean_lineage_length"],
+                "max_lineage_length" : lineage_stats["max_lineage_length"],        
             }
             if wandb_logging is True:   
                 wandb.log(step_logs)   

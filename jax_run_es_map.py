@@ -13,7 +13,7 @@ def run_es_experiment():
         "episode_max_length" : 250,
         "env_deterministic" : True, 
 
-        "ES_NUM_GENERATIONS" : 1000,  # was 1000
+        "ES_NUM_GENERATIONS" : 5000,  # was 1000
         "ES_popsize" : 10000,
         "ES_sigma" : 0.02,
         "ES_OPTIMIZER_TYPE" : "ADAM",

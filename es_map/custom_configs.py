@@ -97,6 +97,60 @@ combined_config_list = {
 }
 
 
+ablation_config_list = {
+    "FULL_MM" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "multi_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "FULL_ND" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "nd_sorted_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "NO_EVOLVABILITY_UPDATE_MM" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "multi_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "NO_EVOLVABILITY_UPDATE_NO_INNOV_ND" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness"],
+        "BMAP_type_and_metrics" : {"type" : "nd_sorted_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+     "NO_EVOLVABILITY_UPDATE_NO_INNOV_MM" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness"],
+        "BMAP_type_and_metrics" : {"type" : "multi_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "NO_EVOLVABILITY_UPDATE_ND" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "nd_sorted_map", "metrics" : ["excpected_fitness","evo_ent","innovation"]},
+    },
+    "NO_EVOLVABILITY_SELECTION" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["excpected_fitness"]},
+    },
+    "NO_EVOLVABILITY_SELECTION_EVAL_FITNESS" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","evo_ent","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["eval_fitness"]},
+    },
+    "NO_BOTH_ME__exploit" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["eval_fitness"]},
+    },
+    "NO_BOTH_ME__explore-exploit" : {
+        "ES_UPDATES_MODES_TO_USE" : ["fitness","innovation"],
+        "BMAP_type_and_metrics" : {"type" : "single_map", "metrics" : ["eval_fitness"]},
+    },
+}
+
+
+# Metrics
+# Best ever fitness
+# Best ever eval fitness
+# Best ever evolvability
+# QD
+# ED
+
+
+# envs humanoid and ent dist_final_pos
+
 
 
 # The configs here is kind of additive testing, adding one feature, and see if it helps.
@@ -116,6 +170,8 @@ def get_config_from_index(default_config,index):
             selected_config_dict = config_list
         elif default_config["config_list_name"] == "combined_update_list":
             selected_config_dict = combined_config_list
+        elif default_config["config_list_name"] == "ablation_list":
+            selected_config_dict = ablation_config_list
         else:
             raise "Unknown config_list_name"
     else:

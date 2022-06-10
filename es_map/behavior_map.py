@@ -106,6 +106,20 @@ class Grid_behaviour_multi_map:
         else:
             return self.data[selected_channel_i][non_empty_mask]
            
+    def get_ed_score(self,evolvability_type):
+        
+        best_evolvability_or_zero = np.zeros_like(self.data[0])
+        for channel_i,m in enumerate(self.b_map_metrics):
+            channel_evolvability_or_zero = np.zeros_like(self.data[0])
+            non_empty_mask = self.data[channel_i] != None
+            channel_evolvability_or_zero[non_empty_mask] = self.data[channel_i][non_empty_mask]["elite"][evolvability_type]
+            best_evolvability_or_zero = np.max(channel_evolvability_or_zero,best_evolvability_or_zero)
+        
+        return np.sum(best_evolvability_or_zero)
+        
+        
+        
+
 
 # Centroidal Voronoi Tessellations, useful for high dimensional behavior spaces
 class CVT_behaviour_map:
