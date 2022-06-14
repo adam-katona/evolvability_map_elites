@@ -108,14 +108,31 @@ class Grid_behaviour_multi_map:
            
     def get_ed_score(self,evolvability_type):
         
-        best_evolvability_or_zero = np.zeros_like(self.data[0])
-        for channel_i,m in enumerate(self.b_map_metrics):
-            channel_evolvability_or_zero = np.zeros_like(self.data[0])
-            non_empty_mask = self.data[channel_i] != None
-            channel_evolvability_or_zero[non_empty_mask] = self.data[channel_i][non_empty_mask]["elite"][evolvability_type]
-            best_evolvability_or_zero = np.max(channel_evolvability_or_zero,best_evolvability_or_zero)
+        def get_evolvability_or_zero(val):
+            if val is None:
+                return 0.0
+            else:
+                return val["elite"][evolvability_type]
+            
+        evo_or_zero = np.vectorize(get_evolvability_or_zero)(self.data)
+        # maximize over channels
+        evo_or_zero = np.max(evo_or_zero,axis=0)
+        return np.sum(evo_or_zero)
         
-        return np.sum(best_evolvability_or_zero)
+        
+        #best_evolvability_or_zero = np.zeros_like(self.data[0])
+        #for channel_i,m in enumerate(self.b_map_metrics):
+        #    channel_evolvability_or_zero = np.zeros_like(self.data[0])
+        #    non_empty_mask = self.data[channel_i] != None
+         #   
+        #    evo_or_zero = np.array(map(f, x))
+        #    
+        #    
+        #    channel_evolvability_or_zero[non_empty_mask] = self.data[channel_i][non_empty_mask]["elite"][evolvability_type]
+        #    
+        #    best_evolvability_or_zero = np.max(channel_evolvability_or_zero,best_evolvability_or_zero)
+        
+        #return np.sum(best_evolvability_or_zero)
         
         
         

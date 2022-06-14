@@ -407,7 +407,8 @@ def train(config,wandb_logging=True):
                 
                 rollout_results,new_obs_stats = jax_evaluate.rollout_episodes(env,all_model_params,observation_stats,config,
                                                                                     batch_model_apply_fn)
-                observation_stats = new_obs_stats 
+                if generation_number == 0:
+                    observation_stats = new_obs_stats 
                 mean_eval_bd = jnp.mean(rollout_results["bds"][population_size:],axis=0) # for the first parent, add it to the archive
                 b_archive.append(mean_eval_bd)
                 
@@ -451,7 +452,8 @@ def train(config,wandb_logging=True):
             
             rollout_results,new_obs_stats = jax_evaluate.rollout_episodes(env,all_model_params,observation_stats,config,
                                                                                 batch_model_apply_fn)
-            observation_stats = new_obs_stats 
+            if generation_number == 0:
+                observation_stats = new_obs_stats 
             
             fitness = rollout_results["fitnesses"]
             bds = rollout_results["bds"]
@@ -545,7 +547,7 @@ def train(config,wandb_logging=True):
             if evo_var > best_ever_evo_var:
                 best_ever_evo_var = evo_var
             if evo_ent > best_ever_evo_ent:
-                best_ever_evo_var = evo_ent
+                best_ever_evo_ent = evo_ent
             
             if eval_normal_fitness > best_ever_eval_normal_fitness:
                 best_ever_eval_normal_fitness = eval_normal_fitness
