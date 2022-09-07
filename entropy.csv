@@ -1,0 +1,15 @@
+,algo_name,ant,humanoid
+0,ES,     184.9±      44.9,       3.9±       0.7
+1,E-ES,      96.8±      41.0,       4.0±       0.2
+2,QE-ES,     103.1±      17.9,       4.7±       1.1
+3,QDE-ES,     192.3±      30.8,       2.7±       0.2
+4,ME_exploit,     539.3±     117.2,       8.7±       4.3
+5,ME_explore_exploit,     137.0±      31.1,       7.0±       3.6
+6,ME_no_selection_eval,     164.3±      48.8,       9.3±       3.8
+7,ME_no_selection,     185.8±      15.9,       9.0±       2.7
+8,ME-MM_exploit,     144.1±      32.9,       7.4±       2.7
+9,ME-ND_exploit,     140.8±      26.1,       8.8±       3.4
+10,ME-MM_explore_exploit,     487.3±     115.7,      10.5±       4.8
+11,ME-ND_explore_exploit,     514.0±     228.4,       9.7±       4.5
+12,ME-MM_full,     190.3±      37.4,       9.4±       3.0
+13,ME-ND_full,     192.3±      21.4,      12.3±       3.3
