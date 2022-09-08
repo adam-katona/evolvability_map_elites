@@ -389,6 +389,7 @@ def train(config,wandb_logging=True):
         ## UPDATE STEPS ##
         ##################
         optimizer_state = None # Whenever a new parent is selected, we reset optimizer state
+        new_parent_selected = True
         for update_step_i in range(config["ES_STEPS_UNTIL_NEW_PARENT_SELECTION"]):
         
             #######################
@@ -396,7 +397,9 @@ def train(config,wandb_logging=True):
             #######################
             
             # Only needed if we dont have cached evaluations already (first parent)
-            if current_idividual["child_eval"] is None:
+            # or this isnt the first time this individual is selected as parent
+            if current_idividual["child_eval"] is None or new_parent_selected is True:
+                new_parent_selected = False
                 key, key_create_pop = jax.random.split(key, 2)
                 all_params,perturbations = jax_es_update.jax_es_create_population(
                                                                         current_idividual["params"],key_create_pop,

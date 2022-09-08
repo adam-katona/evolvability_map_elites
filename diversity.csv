@@ -1,0 +1,11 @@
+,algo_name,ant,humanoid
+0,ME_exploit,     0.093±     0.017,     0.007±     0.002
+1,ME_explore_exploit,     0.220±     0.040,     0.010±     0.004
+2,ME_no_selection_eval,     0.113±     0.047,     0.009±     0.003
+3,ME_no_selection,     0.123±     0.030,     0.012±     0.003
+4,ME-MM_exploit,     0.225±     0.054,     0.009±     0.002
+5,ME-ND_exploit,     0.221±     0.041,     0.010±     0.004
+6,ME-MM_explore_exploit,     0.088±     0.016,     0.007±     0.002
+7,ME-ND_explore_exploit,     0.080±     0.020,     0.007±     0.002
+8,ME-MM_full,     0.113±     0.044,     0.011±     0.003
+9,ME-ND_full,     0.140±     0.015,     0.013±     0.004
